@@ -10,41 +10,38 @@ const pool = new Pool({
 });
 
 const sql = `
--- สร้างตารางหลัก
-CREATE TABLE IF NOT EXISTS "ninetyMember" (
+-- ลบของเก่าที่มีปัญหาออกให้เกลี้ยง
+DROP TABLE IF EXISTS "memberWallet" CASCADE;
+DROP TABLE IF EXISTS "ninetyMember" CASCADE;
+DROP TABLE IF EXISTS "redeemlogs" CASCADE;
+DROP TABLE IF EXISTS "bot_admins" CASCADE;
+
+-- 1. สร้างตารางแม่ (ใช้ประเภท SERIAL เพื่อให้เป็นตัวเลข)
+CREATE TABLE "ninetyMember" (
     id SERIAL PRIMARY KEY,
     line_user_id TEXT UNIQUE NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- สร้างตาราง Wallet
-CREATE TABLE IF NOT EXISTS "memberWallet" (
+-- 2. สร้างตารางลูก (ใช้ INTEGER ให้ตรงกับแม่)
+CREATE TABLE "memberWallet" (
     member_id INTEGER PRIMARY KEY REFERENCES "ninetyMember"(id) ON DELETE CASCADE,
     point_balance INTEGER DEFAULT 0
 );
 
--- ✨ สร้างตาราง Redeemlogs (ที่ Boss ต้องการ)
-CREATE TABLE IF NOT EXISTS "redeemlogs" (
-    id SERIAL PRIMARY KEY,
-    member_id INTEGER REFERENCES "ninetyMember"(id),
-    machine_id TEXT,
-    points_redeemed INTEGER,
-    status TEXT DEFAULT 'pending',
+-- 3. ตาราง Admin
+CREATE TABLE "bot_admins" (
+    line_user_id TEXT PRIMARY KEY, 
+    admin_name TEXT NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- ตารางอื่น ๆ
-CREATE TABLE IF NOT EXISTS "qrPointToken" (
-    id SERIAL PRIMARY KEY, qr_token TEXT UNIQUE NOT NULL, point_get INTEGER NOT NULL,
-    machine_id TEXT, is_used BOOLEAN DEFAULT FALSE, used_by TEXT, used_at TIMESTAMP WITH TIME ZONE, create_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-CREATE TABLE IF NOT EXISTS "point_requests" (
-    id SERIAL PRIMARY KEY, line_user_id TEXT NOT NULL, points INTEGER NOT NULL, request_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-CREATE TABLE IF NOT EXISTS "bot_admins" (
-    line_user_id TEXT PRIMARY KEY, admin_name TEXT NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+-- เพิ่ม Boss เป็น Admin ทันที
+INSERT INTO "bot_admins" (line_user_id, admin_name) 
+VALUES ('U8d1d21082843a3aedb6cdd65f8779454', 'Boss Prem')
+ON CONFLICT (line_user_id) DO NOTHING;
 `;
+
 
 async function runSetup() {
   try {
