@@ -245,6 +245,65 @@ async function listSubReport(replyToken, type) {
 }
 
 // (ฟังก์ชันอื่น ๆ เช่น sendReply, sendFlex คงเดิมตาม Logic ของ Boss ค่ะ)
+// --- ส่วนที่หายไป (เพิ่มเข้าไปต่อท้ายไฟล์นะคะ Boss) ---
+
+async function deleteAdmin(tid, rt) {
+  await pool.query('DELETE FROM bot_admins WHERE line_user_id = $1', [tid]);
+  await sendReply(rt, "🗑️ ลบแอดมินเรียบร้อยแล้วค่ะ");
+}
+
+async function sendManageAdminFlex(rt) {
+  const flex = { type: "bubble", body: { type: "box", layout: "vertical", spacing: "md", contents: [{ type: "text", text: "⚙️ ADMIN SETTINGS", weight: "bold", size: "lg" }, { type: "button", style: "secondary", action: { type: "message", label: "📋 LIST & REMOVE ADMIN", text: "LIST_ADMIN" } }, { type: "button", style: "primary", color: "#00b900", action: { type: "message", label: "➕ ADD NEW ADMIN", text: "ADD_ADMIN_STEP1" } }] } };
+  await sendFlex(rt, "Admin Settings", flex);
+}
+
+async function listAdminsWithDelete(rt) {
+  const res = await pool.query('SELECT * FROM bot_admins');
+  const adms = res.rows;
+  const adminRows = (adms || []).map(a => ({ 
+      type: "box", layout: "horizontal", margin: "md", alignItems: "center",
+      contents: [
+          { type: "text", text: `👤 ${a.admin_name}`, size: "sm", flex: 5, gravity: "center" }, 
+          { type: "button", style: "primary", color: "#ff4b4b", height: "sm", flex: 2, action: { type: "message", label: "DEL", text: `DEL_ADMIN_ID ${a.line_user_id}` } }
+      ] 
+  }));
+  await sendFlex(rt, "Admin List", { type: "bubble", body: { type: "box", layout: "vertical", contents: [{ type: "text", text: "🔐 ADMIN LIST", weight: "bold", size: "lg", margin: "md" }, ...adminRows] } });
+}
+
+async function sendUserHistory(targetUid, rt) {
+    try {
+        const earnsRes = await pool.query('SELECT * FROM "qrPointToken" WHERE used_by = $1 AND is_used = true ORDER BY used_at DESC LIMIT 15', [targetUid]);
+        const memRes = await pool.query('SELECT id FROM "ninetyMember" WHERE line_user_id = $1', [targetUid]);
+        
+        let redeems = [];
+        if (memRes.rows[0]) {
+            const rdm = await pool.query('SELECT * FROM "redeemlogs" WHERE member_id = $1 ORDER BY created_at DESC LIMIT 15', [memRes.rows[0].id]);
+            redeems = rdm.rows;
+        }
+
+        let allTx = [
+            ...(earnsRes.rows || []).map(e => ({ label: `EARN[${e.machine_id || '-'}]`, pts: `+${e.point_get}`, time: e.used_at || e.create_at, color: "#00b900" })),
+            ...(redeems || []).map(u => ({ label: `REDEEM[${u.machine_id || '-'}]`, pts: `-${u.points_redeemed}`, time: u.created_at, color: "#ff4b4b" }))
+        ];
+
+        allTx.sort((a, b) => new Date(b.time) - new Date(a.time));
+        const finalHistory = allTx.slice(0, 15);
+
+        const flex = {
+            type: "bubble",
+            header: { type: "box", layout: "vertical", backgroundColor: "#333333", contents: [{ type: "text", text: `📜 HISTORY: ${targetUid.substring(0,8)}...`, color: "#ffffff", weight: "bold", size: "xs" }] },
+            body: { type: "box", layout: "vertical", spacing: "sm", contents: finalHistory.map(tx => ({
+                type: "box", layout: "horizontal", contents: [
+                    { type: "text", text: tx.label, size: "xxs", flex: 5, color: "#555555", weight: "bold" },
+                    { type: "text", text: tx.pts, size: "xs", flex: 4, weight: "bold", color: tx.color, align: "end" },
+                    { type: "text", text: new Date(tx.time).toLocaleDateString('th-TH') , size: "xxs", flex: 3, align: "end", color: "#aaaaaa" }
+                ]
+            })) }
+        };
+        await sendFlex(rt, "User History", flex);
+    } catch (e) { console.error(e); await sendReply(rt, "❌ ไม่สามารถดึงประวัติได้ค่ะ"); }
+}
+
 async function sendReply(rt, text) { 
     try { await axios.post("https://api.line.me/v2/bot/message/reply", { replyToken: rt, messages: [{ type: "text", text }] }, { headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` }}); } catch (e) { console.error(e.response?.data); }
 }
