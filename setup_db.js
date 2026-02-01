@@ -1,42 +1,45 @@
-const { Pool } = require('pg');
-
-// 🔌 ข้อมูลเชื่อมต่อเดิมของ Boss (เรเช็กแล้วว่า Port 50229 ถูกต้องสำหรับ Public)
-const pool = new Pool({
-  user: 'postgres',
-  host: 'nozomi.proxy.rlwy.net', 
-  database: 'railway',
-  password: 'udGKTbWpMjoQqHQJcpUjlyvfvuosMfzz',
-  port: 50229, 
-  ssl: { rejectUnauthorized: false }
-});
-
-// 👑 คำสั่งแต่งตั้งแอดมิน
 const sql = `
-INSERT INTO "bot_admins" (line_user_id, admin_name) 
-VALUES ('U8d1d21082843a3aedb6cdd65f8779454', 'Boss Prem')
-ON CONFLICT (line_user_id) DO NOTHING;
+-- สร้างตารางแม่ก่อน
+CREATE TABLE IF NOT EXISTS "ninetyMember" (
+    id SERIAL PRIMARY KEY,
+    line_user_id TEXT UNIQUE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
--- ดึงข้อมูลออกมาเช็กดูว่าเข้าหรือยัง
-SELECT * FROM "bot_admins";
+-- ค่อยสร้างตารางลูกที่ต้องอ้างอิงถึงตารางแม่
+CREATE TABLE IF NOT EXISTS "memberWallet" (
+    member_id INTEGER PRIMARY KEY REFERENCES "ninetyMember"(id) ON DELETE CASCADE,
+    point_balance INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS "redeemlogs" (
+    id SERIAL PRIMARY KEY,
+    member_id INTEGER REFERENCES "ninetyMember"(id),
+    machine_id TEXT,
+    points_redeemed INTEGER,
+    status TEXT DEFAULT 'pending',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- ตารางอื่น ๆ ที่เหลือ
+CREATE TABLE IF NOT EXISTS "qrPointToken" (
+    id SERIAL PRIMARY KEY, qr_token TEXT UNIQUE NOT NULL, point_get INTEGER NOT NULL,
+    machine_id TEXT, scan_amount INTEGER, is_used BOOLEAN DEFAULT FALSE,
+    used_by TEXT, used_at TIMESTAMP WITH TIME ZONE, create_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS "point_requests" (
+    id SERIAL PRIMARY KEY, line_user_id TEXT NOT NULL, points INTEGER NOT NULL,
+    request_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS "bot_admins" (
+    line_user_id TEXT PRIMARY KEY, admin_name TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS "system_configs" (
+    config_key TEXT PRIMARY KEY, baht_val INTEGER, point_val INTEGER,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 `;
-
-async function runSetup() {
-  try {
-    console.log("⏳ กำลังส่งคำสั่งแต่งตั้งแอดมินไปที่ Railway...");
-    const res = await pool.query(sql);
-    
-    // แสดงผลที่ดึงออกมาจาก SELECT
-    if (res[1] && res[1].rows) {
-        console.log("✅ รายชื่อแอดมินปัจจุบัน:");
-        console.table(res[1].rows);
-    }
-    
-    console.log("\n✨ เรียบร้อยแล้วค่ะ Boss! ตอนนี้บอทจะรู้จัก Boss ในฐานะ Admin แล้วค่ะ");
-  } catch (err) {
-    console.error("❌ เกิดข้อผิดพลาด:", err.message);
-  } finally {
-    await pool.end();
-  }
-}
-
-runSetup();
