@@ -13,28 +13,35 @@ const pool = new Pool({
 });
 
 const sql = `
-CREATE TABLE IF NOT EXISTS "memberWallet" (
+-- 1. ล้างของเก่าออกก่อน (ถ้ามี) เพื่อเริ่มใหม่แบบสะอาดๆ
+DROP TABLE IF EXISTS "memberWallet" CASCADE;
+DROP TABLE IF EXISTS "ninetyMember" CASCADE;
+
+-- 2. สร้างตารางหลัก (Parent)
+CREATE TABLE "ninetyMember" (
+    id SERIAL PRIMARY KEY,
+    line_user_id TEXT UNIQUE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 3. สร้างตารางลูก (Child) ที่ต้องอ้างอิงถึงตารางหลัก
+CREATE TABLE "memberWallet" (
     member_id INTEGER PRIMARY KEY REFERENCES "ninetyMember"(id) ON DELETE CASCADE,
     point_balance INTEGER DEFAULT 0
 );
+
+-- 4. สร้างตารางอื่นๆ ที่เหลือ
 CREATE TABLE IF NOT EXISTS "qrPointToken" (
     id SERIAL PRIMARY KEY, qr_token TEXT UNIQUE NOT NULL, point_get INTEGER NOT NULL,
     machine_id TEXT, scan_amount INTEGER, is_used BOOLEAN DEFAULT FALSE,
     used_by TEXT, used_at TIMESTAMP WITH TIME ZONE, create_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
-CREATE TABLE IF NOT EXISTS "redeemlogs" (
-    id SERIAL PRIMARY KEY, member_id INTEGER REFERENCES "ninetyMember"(id) ON DELETE CASCADE,
-    machine_id TEXT, points_redeemed INTEGER NOT NULL, status TEXT DEFAULT 'pending',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+
 CREATE TABLE IF NOT EXISTS "point_requests" (
     id SERIAL PRIMARY KEY, line_user_id TEXT NOT NULL, points INTEGER NOT NULL,
     request_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
-CREATE TABLE IF NOT EXISTS "system_configs" (
-    config_key TEXT PRIMARY KEY, baht_val INTEGER DEFAULT 10, point_val INTEGER DEFAULT 1,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+
 CREATE TABLE IF NOT EXISTS "bot_admins" (
     line_user_id TEXT PRIMARY KEY, admin_name TEXT NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
