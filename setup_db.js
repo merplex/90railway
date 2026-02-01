@@ -4,7 +4,11 @@ const { Pool } = require('pg');
 const connectionString = 'postgres-production-6e9d.up.railway.app';
 
 const pool = new Pool({
-  connectionString,
+  user: 'postgres',
+  host: 'nozomi.proxy.rlwy.net', // ก๊อปมาจากหน้า Public Networking
+  database: 'railway',
+  password: 'udGKTbWpMjoQqHQJcpUjlyvfvuosMfzz',
+  port: 50229, // ⚠️ เปลี่ยนจาก 5432 เป็นเลขที่ Boss เห็นในหน้า Settings ค่ะ!
   ssl: { rejectUnauthorized: false }
 });
 
