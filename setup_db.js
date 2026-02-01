@@ -1,7 +1,7 @@
 const { Pool } = require('pg');
 
 // ✅ ก๊อปปี้ DATABASE_URL จากหน้า Variables ของ Railway มาวางในนี้ค่ะ
-const connectionString = 'postgresql://${{PGUSER}}:${{POSTGRES_PASSWORD}}@${{RAILWAY_PRIVATE_DOMAIN}}:5432/${{PGDATABASE}}';
+const connectionString = 'postgres-production-6e9d.up.railway.app';
 
 const pool = new Pool({
   connectionString,
