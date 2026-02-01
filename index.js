@@ -1,3 +1,5 @@
+// เพิ่มบรรทัดนี้เพื่อเช็กค่าใน Logs
+console.log("🔍 Checking DB URL:", process.env.DATABASE_URL ? "OK (Found)" : "NOT FOUND (Empty)");
 require("dotenv").config();
 const crypto = require("crypto");
 const express = require("express");
