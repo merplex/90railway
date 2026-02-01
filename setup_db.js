@@ -1,3 +1,14 @@
+const sql = `
+INSERT INTO "bot_admins" (line_user_id, admin_name) 
+VALUES ('U8d1d21082843a3aedb6cdd65f8779454', 'Boss Prem')
+ON CONFLICT (line_user_id) DO NOTHING;
+
+-- ลองดึงรายชื่อแอดมินมาดูเพื่อเช็กผล
+SELECT * FROM "bot_admins";
+`;
+
+
+/*
 const { Pool } = require('pg');
 
 // ✅ ก๊อปปี้ DATABASE_URL จากหน้า Variables ของ Railway มาวางในนี้ค่ะ
@@ -61,3 +72,4 @@ async function runSetup() {
 }
 
 runSetup();
+*/
