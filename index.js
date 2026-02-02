@@ -9,7 +9,7 @@ const axios = require("axios");
 const { Pool } = require("pg");
 
 const app = express();
-// บรรทัดนี้สำคัญมาก: มันบอกให้ Server เปิดไฟล์ในโฟลเดอร์ public (ต้องมี index.html อยู่ในนั้น)
+// เปิดให้ Server อ่านไฟล์ในโฟลเดอร์ public (ต้องมี index.html ในนั้น)
 app.use(cors(), express.json(), express.static("public"));
 
 const pool = new Pool({
@@ -88,7 +88,7 @@ app.get("/liff/consume", async (req, res) => {
   } catch (err) { res.status(500).send(err.message); }
 });
 
-// ลิงก์หักแต้ม (Redeem) - ส่วนที่ Boss กลัวลืม ใส่ไว้ให้ครบแล้วครับ
+// ลิงก์หักแต้ม (Redeem)
 app.get("/liff/redeem-execute", async (req, res) => {
   try {
     let { userId, amount, machine_id } = req.query;
@@ -143,7 +143,7 @@ app.post("/webhook", async (req, res) => {
         if (userMsg === "ADMIN") return await sendAdminDashboard(event.replyToken);
         if (userMsg === "REPORT") return await sendReportMenu(event.replyToken);
         
-        // เมนู Report ย่อย (เพิ่ม REDEEMS ให้แล้วครับ)
+        // เมนู Report ย่อย
         if (userMsg === "SUB_PENDING") return await listSubReport(event.replyToken, "PENDING");
         if (userMsg === "SUB_EARNS") return await listSubReport(event.replyToken, "EARNS");
         if (userMsg === "SUB_REDEEMS") return await listSubReport(event.replyToken, "REDEEMS");
@@ -156,11 +156,10 @@ app.post("/webhook", async (req, res) => {
         if (userMsg.startsWith("GET_HISTORY ")) return await sendUserHistory(rawMsg.split(" ")[1], event.replyToken);
       }
 
-      // ระบบขอแต้ม (มีกัน Spam 24 ชม.)
+      // ระบบขอแต้ม
       const pointMatch = rawMsg.match(/^(\d+)\s*(แต้ม|คะแนน|p|point|pts)?$/i);
       if (pointMatch) {
           const points = parseInt(pointMatch[1]);
-          // เช็กก่อนว่ามีคำขอเก่าค้างอยู่ไหม (ภายใน 24 ชม.)
           const pendingCheck = await pool.query(
               `SELECT request_at FROM point_requests WHERE line_user_id = $1 AND request_at > NOW() - INTERVAL '24 hours'`, 
               [userId]
@@ -188,7 +187,7 @@ app.post("/webhook", async (req, res) => {
 });
 
 /* ============================================================
-   3. FUNCTIONS (HELPERS)
+   3. FUNCTIONS & HELPERS
 ============================================================ */
 async function isAdmin(uid) { 
     const res = await pool.query('SELECT line_user_id FROM bot_admins WHERE line_user_id = $1', [uid]);
@@ -237,17 +236,13 @@ async function approveSpecificPoint(rid, rt) {
     await sendReplyPush(req.line_user_id, `🎊 แอดมินอนุมัติ ${req.points} แต้มแล้วค่ะ`);
 }
 
-// ✨ ระบบ Report อัปเกรด (กด ID ดูประวัติได้ + มีเมนู Redeem)
-/* ============================================================
-   🎨 ส่วนที่ 1: แก้ไขการแสดงผล Report (ให้สวย เนียนตา)
-============================================================ */
-
-// เปลี่ยนจาก Button เป็น Text ที่กดได้ (เพื่อให้ตัวเล็กเท่ากันและบรรทัดชิด)
+// ✨ REPORT SYSTEM (สวยงาม + ตัวเล็ก + บรรทัดชิด)
+// ⚠️ สำคัญ: createRow ต้องอยู่ "ก่อน" listSubReport เพื่อไม่ให้ Error
 const createRow = (machine, uid, pts, time, color, fullUid) => ({
     type: "box", 
     layout: "horizontal", 
-    margin: "none",       // 🟢 ลดช่องว่างระหว่างบรรทัดให้สุด
-    spacing: "xs",        // 🟢 ระยะห่างแนวนอนนิดเดียวพอ
+    margin: "none",       // 🟢 ลดช่องว่างระหว่างบรรทัดให้ชิดสุด
+    spacing: "xs",        
     alignItems: "center",
     contents: [
         { type: "text", text: `[${machine || "?"}]`, size: "xxs", flex: 2, color: "#aaaaaa" },
@@ -258,14 +253,13 @@ const createRow = (machine, uid, pts, time, color, fullUid) => ({
             flex: 4, 
             color: "#4267B2", 
             decoration: "underline", // ขีดเส้นใต้ให้รู้ว่ากดได้
-            action: { type: "message", label: uid, text: `GET_HISTORY ${fullUid}` } // กดแล้วส่งคำสั่ง
+            action: { type: "message", label: uid, text: `GET_HISTORY ${fullUid}` } // ส่ง ID เต็มไปดูประวัติ
         },
         { type: "text", text: pts, size: "xxs", flex: 2, color: color, align: "end", weight: "bold" },
         { type: "text", text: new Date(time).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }), size: "xxs", flex: 2, align: "end", color: "#cccccc" }
     ]
 });
 
-// แก้ไข listSubReport ให้ใช้ createRow แบบใหม่ และลด Spacing กล่องใหญ่
 async function listSubReport(replyToken, type) {
     try {
         let title = "", color = "", rows = [];
@@ -273,7 +267,6 @@ async function listSubReport(replyToken, type) {
         if (type === "PENDING") {
             title = "🔔 Pending (15)"; color = "#ff4b4b";
             const res = await pool.query('SELECT * FROM point_requests ORDER BY request_at DESC LIMIT 15');
-            // ส่วน Pending ปรับให้กด ID ได้เหมือนกัน
             rows = res.rows.map(r => ({
                 type: "box", layout: "horizontal", margin: "xs", alignItems: "center", contents: [
                     { 
@@ -288,11 +281,13 @@ async function listSubReport(replyToken, type) {
         } else if (type === "EARNS") {
             title = "📥 Recent Earns"; color = "#00b900";
             const res = await pool.query('SELECT * FROM "qrPointToken" WHERE is_used = true ORDER BY used_at DESC LIMIT 15');
+            // ส่ง e.used_by เป็นตัวแปรสุดท้าย (Full ID)
             rows = res.rows.map(e => createRow(e.machine_id, e.used_by.substring(0,8), `+${e.point_get}p`, e.used_at, "#00b900", e.used_by));
 
         } else if (type === "REDEEMS") {
             title = "📤 Recent Redeems"; color = "#ff9f00";
             const res = await pool.query(`SELECT r.*, m.line_user_id FROM "redeemlogs" r JOIN "ninetyMember" m ON r.member_id = m.id ORDER BY r.created_at DESC LIMIT 15`);
+            // ส่ง r.line_user_id เป็นตัวแปรสุดท้าย (Full ID)
             rows = res.rows.map(r => createRow(r.machine_id, r.line_user_id.substring(0,8), `-${r.points_redeemed}p`, r.created_at, "#ff4b4b", r.line_user_id));
         }
         
@@ -311,7 +306,6 @@ async function listSubReport(replyToken, type) {
     } catch (e) { console.error(e); await sendReply(replyToken, "❌ Error: " + e.message); }
 }
 
-
 async function sendReply(rt, text) { 
     try { await axios.post("https://api.line.me/v2/bot/message/reply", { replyToken: rt, messages: [{ type: "text", text }] }, { headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` }}); } catch (e) { console.error(e.response?.data); }
 }
@@ -322,22 +316,11 @@ async function sendFlex(rt, alt, contents) {
     try { await axios.post("https://api.line.me/v2/bot/message/reply", { replyToken: rt, messages: [{ type: "flex", altText: alt, contents }] }, { headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` }}); } catch (e) { console.error(e.response?.data); }
 }
 
-// ตัวช่วยสร้าง Row (รองรับปุ่มดูประวัติ)
-const createRow = (machine, uid, pts, time, color, fullUid) => ({
-    type: "box", layout: "horizontal", margin: "xs", alignItems: "center", contents: [
-        { type: "text", text: `[${machine || "?"}]`, size: "xxs", flex: 2, color: "#888888" },
-        { type: "button", style: "link", height: "sm", action: { type: "message", label: uid, text: `GET_HISTORY ${fullUid}` }, flex: 4, color: "#4267B2" },
-        { type: "text", text: pts, size: "xxs", flex: 2, color: color, align: "end", weight: "bold" },
-        { type: "text", text: new Date(time).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }), size: "xxs", flex: 2, align: "end", color: "#aaaaaa" }
-    ]
-});
-
 async function sendAdminDashboard(rt) {
   const flex = { type: "bubble", header: { type: "box", layout: "vertical", backgroundColor: "#1c1c1c", contents: [{ type: "text", text: "90 WASH ADMIN", color: "#00b900", weight: "bold", size: "xl" }] }, body: { type: "box", layout: "vertical", spacing: "md", contents: [{ type: "button", style: "primary", color: "#00b900", action: { type: "message", label: "📊 ACTIVITY REPORT", text: "REPORT" } }, { type: "button", style: "primary", color: "#ff9f00", action: { type: "message", label: "💰 SET EXCHANGE RATIO", text: "SET_RATIO_STEP1" } }] } };
   await sendFlex(rt, "Admin Dashboard", flex);
 }
 
-// เมนู Report แบบครบ 3 ปุ่ม
 async function sendReportMenu(rt) {
   const flex = {
     type: "bubble",
@@ -355,7 +338,6 @@ async function sendReportMenu(rt) {
   await sendFlex(rt, "Report Menu", flex);
 }
 
-// ฟังก์ชันเสริมที่เคยหายไป
 async function deleteAdmin(tid, rt) {
   await pool.query('DELETE FROM bot_admins WHERE line_user_id = $1', [tid]);
   await sendReply(rt, "🗑️ ลบแอดมินเรียบร้อยแล้วค่ะ");
