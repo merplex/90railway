@@ -90,6 +90,24 @@ app.get("/liff/redeem-execute", async (req, res) => {
         res.send(`WAITING_FOR_MACHINE:${logId}`);
     } catch (err) { res.status(500).send(err.message); }
 });
+// 1.2 ดึงแต้มไปโชว์ที่หน้ามือถือ
+app.get("/api/get-user-points", async (req, res) => {
+    const { userId } = req.query;
+    try {
+        const resDb = await pool.query(`
+            SELECT w.point_balance FROM "memberWallet" w 
+            JOIN "ninetyMember" m ON w.member_id = m.id 
+            WHERE m.line_user_id = $1`, [userId]);
+        
+        // ส่งกลับเป็นตัวเลขตรงๆ หรือ 0 ถ้าไม่มีข้อมูล
+        const balance = resDb.rows[0]?.point_balance ?? 0;
+        res.json({ points: balance }); 
+    } catch (e) { 
+        console.error("Fetch points error:", e);
+        res.json({ points: 0 }); 
+    }
+});
+
 
 // 1.3 เครื่อง HMI ยิงมายืนยัน (หักแต้มจริง)
 app.post("/machine/confirm", async (req, res) => {
