@@ -68,38 +68,6 @@ app.get("/liff/consume", async (req, res) => {
     res.send("SUCCESS");
   } catch (err) { res.status(500).send(err.message); }
 });
-    // ... โค้ดส่วนบนเหมือนเดิม ...
-
-    async function checkAndScan(amount) {
-        if (amount > currentPoints) {
-            document.getElementById('errorDisplay').innerText = `แต้มไม่พอ! (ขาด ${amount - currentPoints} แต้ม)`;
-            return;
-        }
-        document.getElementById('errorDisplay').innerText = "";
-
-        // 🟢 เปลี่ยนมาใช้ scanCode ตัวเดิมที่เสถียรกว่า (Standard Scan)
-        if (!liff.scanCode && !liff.scanCodeV2) {
-            alert("LINE ของคุณไม่รองรับการสแกน หรือยังไม่ได้เปิดสิทธิ์ใน Console ค่ะ");
-            return;
-        }
-
-        try {
-            // ใช้ scanCode ตัวปกติ (ถ้ามี) ถ้าไม่มีค่อยไป V2
-            const result = await (liff.scanCode ? liff.scanCode() : liff.scanCodeV2());
-            
-            if (result.value) {
-                const machineId = result.value.trim();
-                executeRedeem(amount, machineId);
-            }
-        } catch (err) {
-            // ถ้า User กดยกเลิก ไม่ต้องโชว์ Error ให้รำคาญก็ได้ค่ะ
-            if (err.message !== "User cancelled") {
-                document.getElementById('errorDisplay').innerText = "Scan Error: " + err.message;
-            }
-        }
-    }
-
-    // ... ฟังก์ชัน executeRedeem เหมือนเดิม ...
 
 app.get("/liff/redeem-execute", async (req, res) => {
   try {
