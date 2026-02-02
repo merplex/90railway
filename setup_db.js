@@ -10,58 +10,73 @@ const pool = new Pool({
 });
 
 const sql = `
--- 1. สร้างตาราง redeemlogs ก่อน (กันเหนียว)
-CREATE TABLE IF NOT EXISTS "redeemlogs" (
-    id SERIAL PRIMARY KEY,
-    member_id INTEGER REFERENCES "ninetyMember"(id) ON DELETE CASCADE,
-    machine_id TEXT,
-    points_redeemed INTEGER NOT NULL,
-    status TEXT DEFAULT 'success',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- 2. รันสคริปต์ Mock Data
 DO $$
 DECLARE
-    machine_name TEXT;
+    boss_id TEXT := 'U8d1d21082843a3aedb6cdd65f8779454'; -- 👑 ID ของ Boss
+    temp_user RECORD;
+    machine_name TEXT; -- ตัวแปรสำหรับเก็บชื่อเครื่อง
     target_user TEXT;
     rand_amount INTEGER;
     rand_points INTEGER;
     rand_redeem INTEGER;
     i INTEGER;
     j INTEGER;
+    k INTEGER; -- ตัวนับลูปเครื่อง
     sys_baht_rate INTEGER := 10;
     machines TEXT[] := ARRAY['MCTE01', 'MCTE02', 'MCTE03', 'MCTE04', 'MCTE05'];
 BEGIN
-    -- สร้าง User จำลอง 20 คน
-    FOR i IN 1..20 LOOP
+    -- 1. 🧨 ล้างข้อมูลเก่า
+    RAISE NOTICE 'กำลังล้างข้อมูลเก่า...';
+    TRUNCATE TABLE "qrPointToken", "redeemlogs", "memberWallet", "point_requests", "ninetyMember" RESTART IDENTITY CASCADE;
+
+    -- 2. 👑 สร้าง User ของ Boss
+    INSERT INTO "ninetyMember" (line_user_id) VALUES (boss_id);
+
+    -- 3. 🤖 สร้าง User จำลองเพิ่มอีก 19 คน
+    FOR i IN 1..19 LOOP
         INSERT INTO "ninetyMember" (line_user_id)
         VALUES ('U' || md5(random()::text)) 
         ON CONFLICT DO NOTHING;
     END LOOP;
 
-    -- สร้างกระเป๋าตังค์
+    -- สร้างกระเป๋าตังค์เริ่มต้นให้ทุกคน (0 บาท)
     INSERT INTO "memberWallet" (member_id, point_balance)
-    SELECT id, 0 FROM "ninetyMember"
-    WHERE id NOT IN (SELECT member_id FROM "memberWallet");
+    SELECT id, 0 FROM "ninetyMember";
 
-    -- วนลูปสร้างข้อมูลทีละเครื่อง
-    FOREACH machine_name IN ARRAY machines LOOP
+    -- 4. 🎁 แจก "เงินขวัญถุง" คนละ 1,000 แต้ม (แก้ปัญหาแต้มติดลบ)
+    FOR temp_user IN SELECT line_user_id FROM "ninetyMember" LOOP
+        INSERT INTO "qrPointToken" (qr_token, point_get, machine_id, scan_amount, is_used, used_by, used_at, create_at)
+        VALUES (
+            'WELCOME-' || md5(random()::text), 
+            1000,           
+            'SYSTEM_GIFT',  
+            0, 
+            true, 
+            temp_user.line_user_id, 
+            NOW(), 
+            NOW()
+        );
+    END LOOP;
+
+    -- 5. 💰 วนลูปจำลองการใช้งานปกติ (Earn & Redeem)
+    -- ⚠️ เปลี่ยนมาใช้ FOR ธรรมดา เพื่อแก้ Error FOREACH
+    FOR k IN 1..array_length(machines, 1) LOOP
+        machine_name := machines[k]; -- ดึงชื่อเครื่องออกมาทีละตัว
         
-        -- Scan (Earn) 50 รายการ
-        FOR j IN 1..50 LOOP
+        -- จำลอง Scan (Earn) เพิ่มเติม
+        FOR j IN 1..30 LOOP
             SELECT line_user_id INTO target_user FROM "ninetyMember" ORDER BY random() LIMIT 1;
             rand_amount := floor(random() * 100 + 1)::int;
             rand_points := floor(rand_amount / sys_baht_rate)::int;
 
             INSERT INTO "qrPointToken" (qr_token, point_get, machine_id, scan_amount, is_used, used_by, used_at, create_at)
-            VALUES ('MOCK-EARN-' || md5(random()::text), rand_points, machine_name, rand_amount, true, target_user, NOW() - (random() * interval '7 days'), NOW() - (random() * interval '7 days'));
+            VALUES ('MOCK-' || md5(random()::text), rand_points, machine_name, rand_amount, true, target_user, NOW() - (random() * interval '7 days'), NOW() - (random() * interval '7 days'));
         END LOOP;
 
-        -- Redeem (แลกแต้ม) 20 รายการ
-        FOR j IN 1..20 LOOP
+        -- จำลอง Redeem (แลกแต้ม) *แลกน้อยกว่าที่แจก รับรองไม่ติดลบ*
+        FOR j IN 1..10 LOOP
             SELECT line_user_id INTO target_user FROM "ninetyMember" ORDER BY random() LIMIT 1;
-            rand_redeem := (floor(random() * 5 + 1) * 10)::int; 
+            rand_redeem := (floor(random() * 5 + 1) * 10)::int; -- แลกทีละ 10-50 แต้ม
 
             INSERT INTO "redeemlogs" (member_id, machine_id, points_redeemed, status, created_at)
             SELECT id, machine_name, rand_redeem, 'success', NOW() - (random() * interval '7 days')
@@ -70,7 +85,7 @@ BEGIN
 
     END LOOP;
 
-    -- คำนวณยอดเงินคงเหลือใหม่
+    -- 6. 🧮 คำนวณยอดเงินคงเหลือใหม่
     UPDATE "memberWallet" w
     SET point_balance = (
         COALESCE((SELECT SUM(point_get) FROM "qrPointToken" q WHERE q.used_by = m.line_user_id AND q.is_used = true), 0)
@@ -85,9 +100,9 @@ END $$;
 
 async function runSetup() {
   try {
-    console.log("⏳ กำลังกู้ตารางและสร้างข้อมูล Mock Data...");
+    console.log("⏳ กำลังล้างบางและแจกเงินขวัญถุง...");
     await pool.query(sql);
-    console.log("✅ เรียบร้อย! ตารางกลับมาแล้ว + ข้อมูลเพียบ!");
+    console.log("✅ เรียบร้อย! ทุกคนได้แต้มเริ่มต้น 1,000 แต้ม + ข้อมูลจำลอง (ไม่มีติดลบแน่นอน)");
   } catch (err) {
     console.error("❌ Error:", err.message);
   } finally {

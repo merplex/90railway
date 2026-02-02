@@ -380,8 +380,8 @@ async function sendUserHistory(targetUid, rt) {
             header: { type: "box", layout: "vertical", backgroundColor: "#333333", contents: [{ type: "text", text: `📜 HISTORY: ${targetUid.substring(0,8)}...`, color: "#ffffff", weight: "bold", size: "xs" }] },
             body: { type: "box", layout: "vertical", spacing: "sm", contents: finalHistory.map(tx => ({
                 type: "box", layout: "horizontal", contents: [
-                    { type: "text", text: tx.label, size: "xxs", flex: 5, color: "#555555", weight: "bold" },
-                    { type: "text", text: tx.pts, size: "xs", flex: 4, weight: "bold", color: tx.color, align: "end" },
+                    { type: "text", text: tx.label, size: "xxs", flex: 6, color: "#555555", weight: "bold" },
+                    { type: "text", text: tx.pts+' ', size: "xs", flex: 4, weight: "bold", color: tx.color, align: "end" },
                     { type: "text", text: new Date(tx.time).toLocaleDateString('th-TH') , size: "xxs", flex: 3, align: "end", color: "#aaaaaa" }
                 ]
             })) }
