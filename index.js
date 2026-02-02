@@ -143,6 +143,7 @@ app.post("/webhook", async (req, res) => {
         if (userMsg === "REPORT") return await sendReportMenu(event.replyToken);
         if (userMsg === "SUB_PENDING") return await listSubReport(event.replyToken, "PENDING");
         if (userMsg === "SUB_EARNS") return await listSubReport(event.replyToken, "EARNS");
+        if (userMsg === "SUB_REDEEMS") return await listSubReport(event.replyToken, "REDEEMS");
         if (userMsg === "LIST_ADMIN") return await listAdminsWithDelete(event.replyToken);
         if (userMsg === "SET_RATIO_STEP1") { ratioWaitList.add(userId); return await sendReply(event.replyToken, "📊 ระบุ บาท:แต้ม (เช่น 10:1)"); }
         if (userMsg === "ADD_ADMIN_STEP1") { adminWaitList.add(userId); return await sendReply(event.replyToken, "🆔 ส่ง ID เว้นวรรคตามด้วยชื่อ"); }
@@ -225,6 +226,7 @@ async function approveSpecificPoint(rid, rt) {
 async function listSubReport(replyToken, type) {
     try {
         let title = "", color = "", rows = [];
+        
         if (type === "PENDING") {
             title = "🔔 Pending (15)"; color = "#ff4b4b";
             const res = await pool.query('SELECT * FROM point_requests ORDER BY request_at DESC LIMIT 15');
@@ -239,12 +241,24 @@ async function listSubReport(replyToken, type) {
             title = "📥 Recent Earns (15)"; color = "#00b900";
             const res = await pool.query('SELECT * FROM "qrPointToken" WHERE is_used = true ORDER BY used_at DESC LIMIT 15');
             rows = res.rows.map(e => createRow(e.machine_id, e.used_by.substring(0,8), `+${e.point_get}p`, e.used_at, "#00b900"));
+        } else if (type === "REDEEMS") {
+            // 👇 ส่วนที่เพิ่มมาใหม่ครับ
+            title = "📤 Recent Redeems (15)"; color = "#ff9f00";
+            // Join ตารางเพื่อเอาชื่อ User จาก member_id
+            const res = await pool.query(`
+                SELECT r.*, m.line_user_id 
+                FROM "redeemlogs" r 
+                JOIN "ninetyMember" m ON r.member_id = m.id 
+                ORDER BY r.created_at DESC LIMIT 15
+            `);
+            rows = res.rows.map(r => createRow(r.machine_id, r.line_user_id.substring(0,8), `-${r.points_redeemed}p`, r.created_at, "#ff4b4b"));
         }
         
         if (rows.length === 0) return await sendReply(replyToken, "ℹ️ ไม่มีรายการ");
         await sendFlex(replyToken, title, { type: "bubble", header: { type: "box", layout: "vertical", backgroundColor: color, contents: [{ type: "text", text: title, color: "#ffffff", weight: "bold" }] }, body: { type: "box", layout: "vertical", spacing: "xs", contents: rows } });
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); await sendReply(replyToken, "❌ Error: " + e.message); }
 }
+
 
 // (ฟังก์ชันอื่น ๆ เช่น sendReply, sendFlex คงเดิมตาม Logic ของ Boss ค่ะ)
 // --- ส่วนที่หายไป (เพิ่มเข้าไปต่อท้ายไฟล์นะคะ Boss) ---
@@ -331,9 +345,23 @@ async function sendAdminDashboard(rt) {
 }
 
 async function sendReportMenu(rt) {
-  const flex = { type: "bubble", body: { type: "box", layout: "vertical", spacing: "md", contents: [{ type: "button", style: "primary", color: "#ff4b4b", action: { type: "message", label: "🔔 Pending Requests", text: "SUB_PENDING" } }, { type: "button", style: "primary", color: "#00b900", action: { type: "message", label: "📥 Recent Earns", text: "SUB_EARNS" } }] } };
+  const flex = {
+    type: "bubble",
+    body: {
+      type: "box",
+      layout: "vertical",
+      spacing: "md",
+      contents: [
+        { type: "button", style: "primary", color: "#ff4b4b", action: { type: "message", label: "🔔 Pending Requests", text: "SUB_PENDING" } },
+        { type: "button", style: "primary", color: "#00b900", action: { type: "message", label: "📥 Recent Earns", text: "SUB_EARNS" } },
+        // 👇 เพิ่มปุ่มนี้ครับ
+        { type: "button", style: "primary", color: "#ff9f00", action: { type: "message", label: "📤 Recent Redeems", text: "SUB_REDEEMS" } }
+      ]
+    }
+  };
   await sendFlex(rt, "Report Menu", flex);
 }
+
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, "0.0.0.0", () => console.log(`🚀 God Mode on port ${PORT}`));
