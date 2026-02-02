@@ -238,6 +238,34 @@ async function approveSpecificPoint(rid, rt) {
 }
 
 // ✨ ระบบ Report อัปเกรด (กด ID ดูประวัติได้ + มีเมนู Redeem)
+/* ============================================================
+   🎨 ส่วนที่ 1: แก้ไขการแสดงผล Report (ให้สวย เนียนตา)
+============================================================ */
+
+// เปลี่ยนจาก Button เป็น Text ที่กดได้ (เพื่อให้ตัวเล็กเท่ากันและบรรทัดชิด)
+const createRow = (machine, uid, pts, time, color, fullUid) => ({
+    type: "box", 
+    layout: "horizontal", 
+    margin: "none",       // 🟢 ลดช่องว่างระหว่างบรรทัดให้สุด
+    spacing: "xs",        // 🟢 ระยะห่างแนวนอนนิดเดียวพอ
+    alignItems: "center",
+    contents: [
+        { type: "text", text: `[${machine || "?"}]`, size: "xxs", flex: 2, color: "#aaaaaa" },
+        { 
+            type: "text", 
+            text: uid, 
+            size: "xxs",      // 🟢 บังคับตัวเล็กเท่าเพื่อน
+            flex: 4, 
+            color: "#4267B2", 
+            decoration: "underline", // ขีดเส้นใต้ให้รู้ว่ากดได้
+            action: { type: "message", label: uid, text: `GET_HISTORY ${fullUid}` } // กดแล้วส่งคำสั่ง
+        },
+        { type: "text", text: pts, size: "xxs", flex: 2, color: color, align: "end", weight: "bold" },
+        { type: "text", text: new Date(time).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }), size: "xxs", flex: 2, align: "end", color: "#cccccc" }
+    ]
+});
+
+// แก้ไข listSubReport ให้ใช้ createRow แบบใหม่ และลด Spacing กล่องใหญ่
 async function listSubReport(replyToken, type) {
     try {
         let title = "", color = "", rows = [];
@@ -245,29 +273,44 @@ async function listSubReport(replyToken, type) {
         if (type === "PENDING") {
             title = "🔔 Pending (15)"; color = "#ff4b4b";
             const res = await pool.query('SELECT * FROM point_requests ORDER BY request_at DESC LIMIT 15');
+            // ส่วน Pending ปรับให้กด ID ได้เหมือนกัน
             rows = res.rows.map(r => ({
-                type: "box", layout: "horizontal", margin: "md", alignItems: "center", contents: [
-                    { type: "button", style: "link", height: "sm", action: { type: "message", label: r.line_user_id.substring(0,6), text: `GET_HISTORY ${r.line_user_id}` }, flex: 3 },
-                    { type: "text", text: `+${r.points}p`, size: "sm", flex: 2, color: "#00b900", weight: "bold" },
-                    { type: "button", style: "primary", color: "#00b900", height: "sm", flex: 3, action: { type: "message", label: "อนุมัติ", text: `APPROVE_ID ${r.id}` } }
+                type: "box", layout: "horizontal", margin: "xs", alignItems: "center", contents: [
+                    { 
+                        type: "text", text: r.line_user_id.substring(0,6), size: "xxs", flex: 3, color: "#4267B2", decoration: "underline",
+                        action: { type: "message", label: r.line_user_id, text: `GET_HISTORY ${r.line_user_id}` }
+                    },
+                    { type: "text", text: `+${r.points}p`, size: "xxs", flex: 2, color: "#00b900", weight: "bold" },
+                    { type: "button", style: "secondary", height: "sm", action: { type: "message", label: "อนุมัติ", text: `APPROVE_ID ${r.id}` }, flex: 3 }
                 ]
             }));
 
         } else if (type === "EARNS") {
-            title = "📥 Recent Earns (15)"; color = "#00b900";
+            title = "📥 Recent Earns"; color = "#00b900";
             const res = await pool.query('SELECT * FROM "qrPointToken" WHERE is_used = true ORDER BY used_at DESC LIMIT 15');
             rows = res.rows.map(e => createRow(e.machine_id, e.used_by.substring(0,8), `+${e.point_get}p`, e.used_at, "#00b900", e.used_by));
 
         } else if (type === "REDEEMS") {
-            title = "📤 Recent Redeems (15)"; color = "#ff9f00";
+            title = "📤 Recent Redeems"; color = "#ff9f00";
             const res = await pool.query(`SELECT r.*, m.line_user_id FROM "redeemlogs" r JOIN "ninetyMember" m ON r.member_id = m.id ORDER BY r.created_at DESC LIMIT 15`);
             rows = res.rows.map(r => createRow(r.machine_id, r.line_user_id.substring(0,8), `-${r.points_redeemed}p`, r.created_at, "#ff4b4b", r.line_user_id));
         }
         
         if (rows.length === 0) return await sendReply(replyToken, "ℹ️ ไม่มีรายการ");
-        await sendFlex(replyToken, title, { type: "bubble", header: { type: "box", layout: "vertical", backgroundColor: color, contents: [{ type: "text", text: title, color: "#ffffff", weight: "bold" }] }, body: { type: "box", layout: "vertical", spacing: "xs", contents: rows } });
+        
+        await sendFlex(replyToken, title, { 
+            type: "bubble", 
+            header: { type: "box", layout: "vertical", backgroundColor: color, contents: [{ type: "text", text: title, color: "#ffffff", weight: "bold" }] }, 
+            body: { 
+                type: "box", 
+                layout: "vertical", 
+                spacing: "none", // 🟢 กำจัดช่องว่างระหว่างบรรทัดให้หมด
+                contents: rows 
+            } 
+        });
     } catch (e) { console.error(e); await sendReply(replyToken, "❌ Error: " + e.message); }
 }
+
 
 async function sendReply(rt, text) { 
     try { await axios.post("https://api.line.me/v2/bot/message/reply", { replyToken: rt, messages: [{ type: "text", text }] }, { headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` }}); } catch (e) { console.error(e.response?.data); }

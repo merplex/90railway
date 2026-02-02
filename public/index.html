@@ -8,20 +8,41 @@
     <style>
         :root { --line-green: #00b900; --bg-grey: #f4f7f6; }
         body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: var(--bg-grey); margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh; color: #333; }
+        
         .card { background: white; width: 85%; max-width: 400px; padding: 40px 20px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); text-align: center; }
+        
+        /* --- Style สำหรับหน้าดูแต้ม (Dashboard) --- */
+        .points-display { font-size: 4rem; font-weight: bold; color: var(--line-green); margin: 10px 0; }
+        .label { color: #888; font-size: 1rem; }
+        .btn-scan { background-color: var(--line-green); color: white; border: none; padding: 15px; width: 100%; border-radius: 50px; font-size: 1.2rem; font-weight: bold; cursor: pointer; margin-top: 20px; box-shadow: 0 4px 10px rgba(0,185,0,0.3); transition: 0.2s; }
+        .btn-scan:active { transform: scale(0.98); background-color: #009900; }
+
+        /* --- Style สำหรับหน้าประมวลผล (ของเก่าของ Boss) --- */
         .icon-box { font-size: 60px; margin-bottom: 20px; }
         .status-text { font-size: 1.2rem; font-weight: bold; margin-bottom: 10px; }
         .detail-text { color: #777; font-size: 0.9rem; line-height: 1.5; }
         .loader { border: 4px solid #f3f3f3; border-top: 4px solid var(--line-green); border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        .btn-close { margin-top: 30px; background: var(--line-green); color: white; border: none; padding: 12px 30px; border-radius: 25px; font-weight: bold; cursor: pointer; display: none; }
+        .btn-close { margin-top: 30px; background: #555; color: white; border: none; padding: 12px 30px; border-radius: 25px; font-weight: bold; cursor: pointer; display: none; }
         .success-icon { color: var(--line-green); display: none; }
         .error-icon { color: #ff4b4b; display: none; }
+
+        /* ซ่อนทั้ง 2 โหมดไว้ก่อน รอเช็ก URL */
+        #dashboardMode, #processMode { display: none; }
     </style>
 </head>
 <body>
 
-<div class="card">
+<div id="dashboardMode" class="card">
+    <div class="label">แต้มสะสมของคุณ</div>
+    <div id="userPoints" class="points-display">...</div>
+    <div class="label">คะแนน</div>
+    
+    <button class="btn-scan" onclick="startScan()">📷 สแกนแลกแต้ม</button>
+    <div id="dashStatus" style="margin-top:10px; color:red; font-size:0.8rem;"></div>
+</div>
+
+<div id="processMode" class="card">
     <div id="loader" class="loader"></div>
     <div id="iconBox" class="icon-box">
         <span id="successIcon" class="success-icon">✅</span>
@@ -29,44 +50,67 @@
     </div>
     <div id="statusText" class="status-text">กำลังประมวลผล...</div>
     <div id="detailText" class="detail-text">กรุณารอสักครู่ ระบบกำลังสื่อสารกับเครื่อง</div>
-    <button id="btnClose" class="btn-close" onclick="liff.closeWindow()">ตกลง</button>
+    <button id="btnClose" class="btn-close" onclick="liff.closeWindow()">ปิดหน้าต่าง</button>
 </div>
 
 <script>
+    // ⚠️ ใส่ LIFF ID เดิมของ Boss ได้เลยครับ
+    const LIFF_ID = "2009026941-FsGWN6uS"; 
+
     async function main() {
         try {
-            await liff.init({ liffId: "2009026941-FsGWN6uS" }); // 👈 ใส่ LIFF ID ของเปรมตรงนี้ค่ะ
-            if (!liff.isLoggedIn()) {
-                liff.login();
-                return;
+            await liff.init({ liffId: LIFF_ID });
+            if (!liff.isLoggedIn()) { liff.login(); return; }
+
+            // เช็ก URL ว่ามี parameter ไหม?
+            const urlParams = new URLSearchParams(window.location.search);
+            const action = urlParams.get('action');
+            const token = urlParams.get('token');
+
+            if (action || token) {
+                // 👉 ถ้ามี -> แสดงหน้า Process (Logic เก่าของ Boss ทำงานตรงนี้)
+                document.getElementById('processMode').style.display = 'block';
+                await runOldProcessLogic(urlParams);
+            } else {
+                // 👉 ถ้าไม่มี -> แสดงหน้า Dashboard (ดูแต้ม)
+                document.getElementById('dashboardMode').style.display = 'block';
+                await loadPoints();
             }
 
+        } catch (err) {
+            alert("LIFF Error: " + err.message);
+        }
+    }
+
+    // -----------------------------------------------------
+    // 🟡 ฟังก์ชัน 1: ของเก่าของ Boss (รับแต้ม / ใช้แต้ม)
+    // -----------------------------------------------------
+    async function runOldProcessLogic(urlParams) {
+        try {
             const profile = await liff.getProfile();
             const userId = profile.userId;
-            const urlParams = new URLSearchParams(window.location.search);
             
-            // ตรวจสอบ Parameter เพื่อแยกฝั่ง
-            const action = urlParams.get('action'); // 'use' สำหรับหักแต้ม
-            const token = urlParams.get('token');   // สำหรับรับแต้ม
+            const action = urlParams.get('action');
+            const token = urlParams.get('token');
             const amount = urlParams.get('amount');
             const machine_id = urlParams.get('machine_id');
 
             let apiUrl = "";
+            
+            // 👇 นี่ไงครับ Logic เก่าที่ Boss ถามหา อยู่ครบถ้วน!
             if (action === "use") {
-                // --- ฝั่งหักแต้ม ---
+                // --- ฝั่งหักแต้ม (Redeem) ---
                 document.getElementById('statusText').innerText = "กำลังหักแต้ม...";
                 apiUrl = `/liff/redeem-execute?userId=${userId}&amount=${amount}&machine_id=${machine_id}`;
             } else {
-                // --- ฝั่งรับแต้ม ---
+                // --- ฝั่งรับแต้ม (Consume) ---
                 document.getElementById('statusText').innerText = "กำลังสะสมแต้ม...";
                 apiUrl = `/liff/consume?token=${token}&userId=${userId}`;
             }
 
-            // เรียก API ไปที่ Backend
             const response = await fetch(apiUrl);
             const result = await response.text();
 
-            // แสดงผลลัพธ์
             document.getElementById('loader').style.display = 'none';
             document.getElementById('btnClose').style.display = 'inline-block';
 
@@ -79,14 +123,45 @@
                 document.getElementById('statusText').innerText = "เกิดข้อผิดพลาด";
                 document.getElementById('detailText').innerText = result;
             }
-
         } catch (err) {
-            console.error(err);
             document.getElementById('loader').style.display = 'none';
             document.getElementById('statusText').innerText = "System Error";
             document.getElementById('detailText').innerText = err.message;
         }
     }
+
+    // -----------------------------------------------------
+    // 🟢 ฟังก์ชัน 2: ของใหม่ (ดูแต้ม + ปุ่มสแกน)
+    // -----------------------------------------------------
+    async function loadPoints() {
+        try {
+            const profile = await liff.getProfile();
+            const response = await fetch(`/api/get-user-points?userId=${profile.userId}`);
+            const data = await response.json();
+            document.getElementById('userPoints').innerText = data.points;
+        } catch (err) {
+            document.getElementById('dashStatus').innerText = "โหลดแต้มไม่สำเร็จ";
+        }
+    }
+
+    async function startScan() {
+        if (!liff.isInClient()) { alert("ต้องเปิดใน LINE เท่านั้น"); return; }
+        try {
+            const result = await liff.scanCodeV2();
+            if (result.value) {
+                const qrText = result.value;
+                // ถ้าสแกนเจอ QR ที่เป็น LIFF Link -> ให้วิ่งไปที่ลิงก์นั้นเลย (เข้า Logic เก่า)
+                if (qrText.includes("liff.line.me")) {
+                    window.location.href = qrText;
+                } else {
+                    alert("QR Code ไม่ถูกต้อง: " + qrText);
+                }
+            }
+        } catch (err) {
+            alert("Scan Error: " + err);
+        }
+    }
+
     main();
 </script>
 
