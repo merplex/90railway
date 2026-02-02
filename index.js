@@ -1,16 +1,17 @@
-// เพิ่มบรรทัดนี้เพื่อเช็กค่าใน Logs
+// เพิ่มบรรทัดนี้เพื่อเช็กค่าใน Logs ตามที่ Boss ขอครับ
 console.log("🔍 Checking DB URL:", process.env.DATABASE_URL ? "OK (Found)" : "NOT FOUND (Empty)");
+
 require("dotenv").config();
 const crypto = require("crypto");
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
-const { Pool } = require("pg"); // เปลี่ยนจาก Supabase เป็น pg
+const { Pool } = require("pg");
 
 const app = express();
+// บรรทัดนี้สำคัญมาก: มันบอกให้ Server เปิดไฟล์ในโฟลเดอร์ public (ต้องมี index.html อยู่ในนั้น)
 app.use(cors(), express.json(), express.static("public"));
 
-// 🔌 เชื่อมต่อฐานข้อมูลผ่าน DATABASE_URL เส้นเดียวจบ
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
@@ -20,12 +21,13 @@ let adminWaitList = new Set();
 let ratioWaitList = new Set(); 
 
 /* ============================================================
-   1. API SYSTEM & HELPERS (เปลี่ยนเป็น SQL Query)
+   1. API SYSTEM (สร้าง QR, เช็กแต้ม, ตัดแต้ม)
 ============================================================ */
+
+// สร้าง QR Code สำหรับแจกแต้ม (Earn)
 app.post("/create-qr", async (req, res) => {
     try {
         const { amount, machine_id } = req.body;
-        // ดึงค่า Ratio จากตาราง system_configs
         const configRes = await pool.query('SELECT * FROM system_configs WHERE config_key = $1', ['exchange_ratio']);
         const config = configRes.rows[0];
         const baht_rate = config ? config.baht_val : 10;
@@ -43,6 +45,7 @@ app.post("/create-qr", async (req, res) => {
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
+// API ให้หน้า index.html ดึงแต้มไปโชว์
 app.get("/api/get-user-points", async (req, res) => {
     const { userId } = req.query;
     try {
@@ -54,6 +57,7 @@ app.get("/api/get-user-points", async (req, res) => {
     } catch (e) { res.status(500).json({ points: 0 }); }
 });
 
+// ลิงก์รับแต้ม (Scan QR)
 app.get("/liff/consume", async (req, res) => {
   try {
     const { token, userId } = req.query;
@@ -62,10 +66,8 @@ app.get("/liff/consume", async (req, res) => {
 
     if (!qrData || qrData.is_used) return res.status(400).send("QR Invalid");
 
-    // อัปเดตตาราง QR
     await pool.query('UPDATE "qrPointToken" SET is_used = true, used_by = $1, used_at = NOW() WHERE qr_token = $2', [userId, token]);
 
-    // เช็ก/สร้างสมาชิก
     let memRes = await pool.query('SELECT id FROM "ninetyMember" WHERE line_user_id = $1', [userId]);
     let memberId;
     if (memRes.rows.length === 0) {
@@ -75,7 +77,6 @@ app.get("/liff/consume", async (req, res) => {
         memberId = memRes.rows[0].id;
     }
 
-    // อัปเดตแต้ม (Upsert)
     await pool.query(`
         INSERT INTO "memberWallet" (member_id, point_balance) VALUES ($1, $2)
         ON CONFLICT (member_id) DO UPDATE SET point_balance = "memberWallet".point_balance + $2
@@ -86,27 +87,24 @@ app.get("/liff/consume", async (req, res) => {
     res.send("SUCCESS");
   } catch (err) { res.status(500).send(err.message); }
 });
-// --- ฝั่งหักแต้ม (Redeem) สำหรับ PostgreSQL ---
+
+// ลิงก์หักแต้ม (Redeem) - ส่วนที่ Boss กลัวลืม ใส่ไว้ให้ครบแล้วครับ
 app.get("/liff/redeem-execute", async (req, res) => {
   try {
     let { userId, amount, machine_id } = req.query;
     
-    // ดึง ID สมาชิกจาก LINE User ID
     const memRes = await pool.query('SELECT id FROM "ninetyMember" WHERE line_user_id = $1', [userId]);
     const member = memRes.rows[0];
     if (!member) return res.status(400).send("ไม่พบข้อมูลสมาชิก");
 
-    // เช็กแต้มใน Wallet
     const wallRes = await pool.query('SELECT point_balance FROM "memberWallet" WHERE member_id = $1', [member.id]);
     const wallet = wallRes.rows[0];
 
     if (!wallet || wallet.point_balance < amount) return res.status(400).send("แต้มไม่พอ");
 
-    // หักแต้ม
     const newBalance = wallet.point_balance - amount;
     await pool.query('UPDATE "memberWallet" SET point_balance = $1 WHERE member_id = $2', [newBalance, member.id]);
 
-    // บันทึก Log การแลก (ต้องมีตาราง redeemlogs นะคะ)
     await pool.query(
         'INSERT INTO "redeemlogs" (member_id, machine_id, points_redeemed, status, created_at) VALUES ($1, $2, $3, $4, NOW())',
         [member.id, machine_id, parseInt(amount), "pending"]
@@ -136,14 +134,20 @@ app.post("/webhook", async (req, res) => {
 
     try {
       if (userMsg === "USER_LINE") return await sendReply(event.replyToken, `ID: ${userId}`);
+      
       if (isUserAdmin) {
         if (ratioWaitList.has(userId)) { ratioWaitList.delete(userId); return await updateExchangeRatio(rawMsg, event.replyToken); }
         if (adminWaitList.has(userId)) { adminWaitList.delete(userId); return await addNewAdmin(rawMsg, event.replyToken); }
+        
+        // เมนู Admin
         if (userMsg === "ADMIN") return await sendAdminDashboard(event.replyToken);
         if (userMsg === "REPORT") return await sendReportMenu(event.replyToken);
+        
+        // เมนู Report ย่อย (เพิ่ม REDEEMS ให้แล้วครับ)
         if (userMsg === "SUB_PENDING") return await listSubReport(event.replyToken, "PENDING");
         if (userMsg === "SUB_EARNS") return await listSubReport(event.replyToken, "EARNS");
         if (userMsg === "SUB_REDEEMS") return await listSubReport(event.replyToken, "REDEEMS");
+        
         if (userMsg === "LIST_ADMIN") return await listAdminsWithDelete(event.replyToken);
         if (userMsg === "SET_RATIO_STEP1") { ratioWaitList.add(userId); return await sendReply(event.replyToken, "📊 ระบุ บาท:แต้ม (เช่น 10:1)"); }
         if (userMsg === "ADD_ADMIN_STEP1") { adminWaitList.add(userId); return await sendReply(event.replyToken, "🆔 ส่ง ID เว้นวรรคตามด้วยชื่อ"); }
@@ -152,12 +156,23 @@ app.post("/webhook", async (req, res) => {
         if (userMsg.startsWith("GET_HISTORY ")) return await sendUserHistory(rawMsg.split(" ")[1], event.replyToken);
       }
 
-      // ระบบขอแต้ม
+      // ระบบขอแต้ม (มีกัน Spam 24 ชม.)
       const pointMatch = rawMsg.match(/^(\d+)\s*(แต้ม|คะแนน|p|point|pts)?$/i);
       if (pointMatch) {
           const points = parseInt(pointMatch[1]);
+          // เช็กก่อนว่ามีคำขอเก่าค้างอยู่ไหม (ภายใน 24 ชม.)
+          const pendingCheck = await pool.query(
+              `SELECT request_at FROM point_requests WHERE line_user_id = $1 AND request_at > NOW() - INTERVAL '24 hours'`, 
+              [userId]
+          );
+
+          if (pendingCheck.rows.length > 0) {
+              const lastTime = new Date(pendingCheck.rows[0].request_at).toLocaleTimeString('th-TH', {hour: '2-digit', minute:'2-digit'});
+              return await sendReply(event.replyToken, `⏳ คุณมีรายการขอแต้มค้างอยู่ (ตั้งแต่ ${lastTime})\nเจ้าหน้าที่กำลังตรวจสอบ รอก่อนนะคะ 🥺`);
+          }
+
           await pool.query('INSERT INTO point_requests (line_user_id, points, request_at) VALUES ($1, $2, NOW())', [userId, points]);
-          return await sendReply(event.replyToken, `📝 ส่งคำขอ ${points} แต้ม ให้แอดมินแล้วค่ะ`);
+          return await sendReply(event.replyToken, `📝 ส่งคำขอ ${points} แต้ม เรียบร้อยค่ะ`);
       }
 
       if (userMsg === "CHECK_POINT") {
@@ -173,7 +188,7 @@ app.post("/webhook", async (req, res) => {
 });
 
 /* ============================================================
-   3. FUNCTIONS (SQL VERSION)
+   3. FUNCTIONS (HELPERS)
 ============================================================ */
 async function isAdmin(uid) { 
     const res = await pool.query('SELECT line_user_id FROM bot_admins WHERE line_user_id = $1', [uid]);
@@ -222,7 +237,7 @@ async function approveSpecificPoint(rid, rt) {
     await sendReplyPush(req.line_user_id, `🎊 แอดมินอนุมัติ ${req.points} แต้มแล้วค่ะ`);
 }
 
-// ✨ ระบบ Report (SQL Version)
+// ✨ ระบบ Report อัปเกรด (กด ID ดูประวัติได้ + มีเมนู Redeem)
 async function listSubReport(replyToken, type) {
     try {
         let title = "", color = "", rows = [];
@@ -231,27 +246,22 @@ async function listSubReport(replyToken, type) {
             title = "🔔 Pending (15)"; color = "#ff4b4b";
             const res = await pool.query('SELECT * FROM point_requests ORDER BY request_at DESC LIMIT 15');
             rows = res.rows.map(r => ({
-                type: "box", layout: "horizontal", margin: "md", contents: [
-                    { type: "text", text: r.line_user_id.substring(0,8), size: "xs", flex: 4 },
-                    { type: "text", text: `+${r.points}p`, size: "sm", flex: 3, color: "#00b900", weight: "bold" },
-                    { type: "button", style: "primary", color: "#00b900", height: "sm", flex: 3, action: { type: "message", label: "OK", text: `APPROVE_ID ${r.id}` } }
+                type: "box", layout: "horizontal", margin: "md", alignItems: "center", contents: [
+                    { type: "button", style: "link", height: "sm", action: { type: "message", label: r.line_user_id.substring(0,6), text: `GET_HISTORY ${r.line_user_id}` }, flex: 3 },
+                    { type: "text", text: `+${r.points}p`, size: "sm", flex: 2, color: "#00b900", weight: "bold" },
+                    { type: "button", style: "primary", color: "#00b900", height: "sm", flex: 3, action: { type: "message", label: "อนุมัติ", text: `APPROVE_ID ${r.id}` } }
                 ]
             }));
+
         } else if (type === "EARNS") {
             title = "📥 Recent Earns (15)"; color = "#00b900";
             const res = await pool.query('SELECT * FROM "qrPointToken" WHERE is_used = true ORDER BY used_at DESC LIMIT 15');
-            rows = res.rows.map(e => createRow(e.machine_id, e.used_by.substring(0,8), `+${e.point_get}p`, e.used_at, "#00b900"));
+            rows = res.rows.map(e => createRow(e.machine_id, e.used_by.substring(0,8), `+${e.point_get}p`, e.used_at, "#00b900", e.used_by));
+
         } else if (type === "REDEEMS") {
-            // 👇 ส่วนที่เพิ่มมาใหม่ครับ
             title = "📤 Recent Redeems (15)"; color = "#ff9f00";
-            // Join ตารางเพื่อเอาชื่อ User จาก member_id
-            const res = await pool.query(`
-                SELECT r.*, m.line_user_id 
-                FROM "redeemlogs" r 
-                JOIN "ninetyMember" m ON r.member_id = m.id 
-                ORDER BY r.created_at DESC LIMIT 15
-            `);
-            rows = res.rows.map(r => createRow(r.machine_id, r.line_user_id.substring(0,8), `-${r.points_redeemed}p`, r.created_at, "#ff4b4b"));
+            const res = await pool.query(`SELECT r.*, m.line_user_id FROM "redeemlogs" r JOIN "ninetyMember" m ON r.member_id = m.id ORDER BY r.created_at DESC LIMIT 15`);
+            rows = res.rows.map(r => createRow(r.machine_id, r.line_user_id.substring(0,8), `-${r.points_redeemed}p`, r.created_at, "#ff4b4b", r.line_user_id));
         }
         
         if (rows.length === 0) return await sendReply(replyToken, "ℹ️ ไม่มีรายการ");
@@ -259,18 +269,53 @@ async function listSubReport(replyToken, type) {
     } catch (e) { console.error(e); await sendReply(replyToken, "❌ Error: " + e.message); }
 }
 
+async function sendReply(rt, text) { 
+    try { await axios.post("https://api.line.me/v2/bot/message/reply", { replyToken: rt, messages: [{ type: "text", text }] }, { headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` }}); } catch (e) { console.error(e.response?.data); }
+}
+async function sendReplyPush(to, text) { 
+    try { await axios.post("https://api.line.me/v2/bot/message/push", { to, messages: [{ type: "text", text }] }, { headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` }}); } catch (e) { console.error(e.response?.data); }
+}
+async function sendFlex(rt, alt, contents) { 
+    try { await axios.post("https://api.line.me/v2/bot/message/reply", { replyToken: rt, messages: [{ type: "flex", altText: alt, contents }] }, { headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` }}); } catch (e) { console.error(e.response?.data); }
+}
 
-// (ฟังก์ชันอื่น ๆ เช่น sendReply, sendFlex คงเดิมตาม Logic ของ Boss ค่ะ)
-// --- ส่วนที่หายไป (เพิ่มเข้าไปต่อท้ายไฟล์นะคะ Boss) ---
+// ตัวช่วยสร้าง Row (รองรับปุ่มดูประวัติ)
+const createRow = (machine, uid, pts, time, color, fullUid) => ({
+    type: "box", layout: "horizontal", margin: "xs", alignItems: "center", contents: [
+        { type: "text", text: `[${machine || "?"}]`, size: "xxs", flex: 2, color: "#888888" },
+        { type: "button", style: "link", height: "sm", action: { type: "message", label: uid, text: `GET_HISTORY ${fullUid}` }, flex: 4, color: "#4267B2" },
+        { type: "text", text: pts, size: "xxs", flex: 2, color: color, align: "end", weight: "bold" },
+        { type: "text", text: new Date(time).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }), size: "xxs", flex: 2, align: "end", color: "#aaaaaa" }
+    ]
+});
 
+async function sendAdminDashboard(rt) {
+  const flex = { type: "bubble", header: { type: "box", layout: "vertical", backgroundColor: "#1c1c1c", contents: [{ type: "text", text: "90 WASH ADMIN", color: "#00b900", weight: "bold", size: "xl" }] }, body: { type: "box", layout: "vertical", spacing: "md", contents: [{ type: "button", style: "primary", color: "#00b900", action: { type: "message", label: "📊 ACTIVITY REPORT", text: "REPORT" } }, { type: "button", style: "primary", color: "#ff9f00", action: { type: "message", label: "💰 SET EXCHANGE RATIO", text: "SET_RATIO_STEP1" } }] } };
+  await sendFlex(rt, "Admin Dashboard", flex);
+}
+
+// เมนู Report แบบครบ 3 ปุ่ม
+async function sendReportMenu(rt) {
+  const flex = {
+    type: "bubble",
+    body: {
+      type: "box",
+      layout: "vertical",
+      spacing: "md",
+      contents: [
+        { type: "button", style: "primary", color: "#ff4b4b", action: { type: "message", label: "🔔 Pending Requests", text: "SUB_PENDING" } },
+        { type: "button", style: "primary", color: "#00b900", action: { type: "message", label: "📥 Recent Earns", text: "SUB_EARNS" } },
+        { type: "button", style: "primary", color: "#ff9f00", action: { type: "message", label: "📤 Recent Redeems", text: "SUB_REDEEMS" } }
+      ]
+    }
+  };
+  await sendFlex(rt, "Report Menu", flex);
+}
+
+// ฟังก์ชันเสริมที่เคยหายไป
 async function deleteAdmin(tid, rt) {
   await pool.query('DELETE FROM bot_admins WHERE line_user_id = $1', [tid]);
   await sendReply(rt, "🗑️ ลบแอดมินเรียบร้อยแล้วค่ะ");
-}
-
-async function sendManageAdminFlex(rt) {
-  const flex = { type: "bubble", body: { type: "box", layout: "vertical", spacing: "md", contents: [{ type: "text", text: "⚙️ ADMIN SETTINGS", weight: "bold", size: "lg" }, { type: "button", style: "secondary", action: { type: "message", label: "📋 LIST & REMOVE ADMIN", text: "LIST_ADMIN" } }, { type: "button", style: "primary", color: "#00b900", action: { type: "message", label: "➕ ADD NEW ADMIN", text: "ADD_ADMIN_STEP1" } }] } };
-  await sendFlex(rt, "Admin Settings", flex);
 }
 
 async function listAdminsWithDelete(rt) {
@@ -319,49 +364,6 @@ async function sendUserHistory(targetUid, rt) {
         await sendFlex(rt, "User History", flex);
     } catch (e) { console.error(e); await sendReply(rt, "❌ ไม่สามารถดึงประวัติได้ค่ะ"); }
 }
-
-async function sendReply(rt, text) { 
-    try { await axios.post("https://api.line.me/v2/bot/message/reply", { replyToken: rt, messages: [{ type: "text", text }] }, { headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` }}); } catch (e) { console.error(e.response?.data); }
-}
-async function sendReplyPush(to, text) { 
-    try { await axios.post("https://api.line.me/v2/bot/message/push", { to, messages: [{ type: "text", text }] }, { headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` }}); } catch (e) { console.error(e.response?.data); }
-}
-async function sendFlex(rt, alt, contents) { 
-    try { await axios.post("https://api.line.me/v2/bot/message/reply", { replyToken: rt, messages: [{ type: "flex", altText: alt, contents }] }, { headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` }}); } catch (e) { console.error(e.response?.data); }
-}
-
-const createRow = (machine, uid, pts, time, color) => ({
-    type: "box", layout: "horizontal", margin: "xs", contents: [
-        { type: "text", text: `[${machine || "?"}]`, size: "xxs", flex: 3, color: "#888888" },
-        { type: "text", text: uid, size: "xxs", flex: 6, weight: "bold", color: "#4267B2" },
-        { type: "text", text: pts, size: "xxs", flex: 3, color: color, align: "end", weight: "bold" },
-        { type: "text", text: new Date(time).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }), size: "xxs", flex: 2, align: "end", color: "#aaaaaa" }
-    ]
-});
-
-async function sendAdminDashboard(rt) {
-  const flex = { type: "bubble", header: { type: "box", layout: "vertical", backgroundColor: "#1c1c1c", contents: [{ type: "text", text: "90 WASH ADMIN", color: "#00b900", weight: "bold", size: "xl" }] }, body: { type: "box", layout: "vertical", spacing: "md", contents: [{ type: "button", style: "primary", color: "#00b900", action: { type: "message", label: "📊 ACTIVITY REPORT", text: "REPORT" } }, { type: "button", style: "primary", color: "#ff9f00", action: { type: "message", label: "💰 SET EXCHANGE RATIO", text: "SET_RATIO_STEP1" } }] } };
-  await sendFlex(rt, "Admin Dashboard", flex);
-}
-
-async function sendReportMenu(rt) {
-  const flex = {
-    type: "bubble",
-    body: {
-      type: "box",
-      layout: "vertical",
-      spacing: "md",
-      contents: [
-        { type: "button", style: "primary", color: "#ff4b4b", action: { type: "message", label: "🔔 Pending Requests", text: "SUB_PENDING" } },
-        { type: "button", style: "primary", color: "#00b900", action: { type: "message", label: "📥 Recent Earns", text: "SUB_EARNS" } },
-        // 👇 เพิ่มปุ่มนี้ครับ
-        { type: "button", style: "primary", color: "#ff9f00", action: { type: "message", label: "📤 Recent Redeems", text: "SUB_REDEEMS" } }
-      ]
-    }
-  };
-  await sendFlex(rt, "Report Menu", flex);
-}
-
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, "0.0.0.0", () => console.log(`🚀 God Mode on port ${PORT}`));
