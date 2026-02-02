@@ -2,164 +2,226 @@
 <html lang="th">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ninety Service</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Ninety Wash</title>
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
-        :root { --line-green: #00b900; --bg-grey: #f4f7f6; }
-        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: var(--bg-grey); margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh; color: #333; }
+        :root { --main-green: #00b900; --bg-color: #f5f5f5; --text-color: #333; }
+        body { font-family: 'Kanit', sans-serif; background-color: var(--bg-color); margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; color: var(--text-color); }
         
-        .card { background: white; width: 85%; max-width: 400px; padding: 40px 20px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); text-align: center; }
+        /* การ์ดหลัก */
+        .card { background: white; width: 100%; max-width: 400px; padding: 25px; border-radius: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); text-align: center; box-sizing: border-box; }
         
-        /* --- Style สำหรับหน้าดูแต้ม (Dashboard) --- */
-        .points-display { font-size: 4rem; font-weight: bold; color: var(--line-green); margin: 10px 0; }
-        .label { color: #888; font-size: 1rem; }
-        .btn-scan { background-color: var(--line-green); color: white; border: none; padding: 15px; width: 100%; border-radius: 50px; font-size: 1.2rem; font-weight: bold; cursor: pointer; margin-top: 20px; box-shadow: 0 4px 10px rgba(0,185,0,0.3); transition: 0.2s; }
-        .btn-scan:active { transform: scale(0.98); background-color: #009900; }
+        /* หัวข้อ */
+        h2 { margin: 0 0 15px 0; font-weight: 600; }
+        
+        /* กล่องโชว์แต้ม */
+        .point-box { background-color: var(--main-green); color: white; padding: 15px; border-radius: 12px; margin-bottom: 10px; box-shadow: 0 4px 8px rgba(0,185,0,0.2); }
+        .point-label { font-size: 0.9rem; opacity: 0.9; }
+        .point-val { font-size: 2.5rem; font-weight: bold; line-height: 1.2; }
+        
+        /* อัตราแลกเปลี่ยน */
+        .rate-badge { background-color: #f0fdf0; color: #555; padding: 5px 15px; border-radius: 20px; font-size: 0.85rem; display: inline-block; margin-bottom: 20px; border: 1px solid #ddefdd; }
+        
+        /* ส่วนกรอกเอง */
+        .input-group { display: flex; gap: 10px; margin-bottom: 20px; }
+        .manual-input { flex: 2; padding: 12px; border: 2px solid #ddd; border-radius: 10px; font-size: 1.1rem; text-align: center; font-family: 'Kanit', sans-serif; outline: none; transition: 0.2s; }
+        .manual-input:focus { border-color: var(--main-green); }
+        .btn-confirm { flex: 1; background-color: var(--main-green); color: white; border: none; border-radius: 10px; font-weight: 600; cursor: pointer; font-size: 1rem; }
+        .btn-confirm:active { transform: scale(0.95); }
 
-        /* --- Style สำหรับหน้าประมวลผล (ของเก่าของ Boss) --- */
-        .icon-box { font-size: 60px; margin-bottom: 20px; }
-        .status-text { font-size: 1.2rem; font-weight: bold; margin-bottom: 10px; }
-        .detail-text { color: #777; font-size: 0.9rem; line-height: 1.5; }
-        .loader { border: 4px solid #f3f3f3; border-top: 4px solid var(--line-green); border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
+        /* Grid ปุ่มตัวเลข */
+        .grid-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+        .btn-quick { background: white; border: 2px solid var(--main-green); color: var(--main-green); padding: 15px 0; border-radius: 12px; font-size: 1.2rem; font-weight: 600; cursor: pointer; transition: 0.2s; }
+        .btn-quick:active { background-color: var(--main-green); color: white; transform: scale(0.95); }
+
+        /* Error Message */
+        .error-msg { color: #ff4b4b; font-size: 0.9rem; margin-top: 15px; min-height: 20px; font-weight: 500; }
+
+        /* Loading Overlay */
+        #loadingOverlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.9); display: none; flex-direction: column; justify-content: center; align-items: center; z-index: 999; }
+        .spinner { width: 50px; height: 50px; border: 5px solid #f3f3f3; border-top: 5px solid var(--main-green); border-radius: 50%; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        .btn-close { margin-top: 30px; background: #555; color: white; border: none; padding: 12px 30px; border-radius: 25px; font-weight: bold; cursor: pointer; display: none; }
-        .success-icon { color: var(--line-green); display: none; }
-        .error-icon { color: #ff4b4b; display: none; }
 
-        /* ซ่อนทั้ง 2 โหมดไว้ก่อน รอเช็ก URL */
-        #dashboardMode, #processMode { display: none; }
+        /* ซ่อน Process Mode เก่า */
+        #processMode { display: none; }
     </style>
 </head>
 <body>
 
-<div id="dashboardMode" class="card">
-    <div class="label">แต้มสะสมของคุณ</div>
-    <div id="userPoints" class="points-display">...</div>
-    <div class="label">คะแนน</div>
-    
-    <button class="btn-scan" onclick="startScan()">📷 สแกนแลกแต้ม</button>
-    <div id="dashStatus" style="margin-top:10px; color:red; font-size:0.8rem;"></div>
-</div>
+    <div id="dashboardMode" class="card">
+        <h2>Ninety Wash</h2>
+        
+        <div class="point-box">
+            <div class="point-label">ยอดแต้มปัจจุบัน</div>
+            <div class="point-val" id="userPoints">...</div>
+        </div>
 
-<div id="processMode" class="card">
-    <div id="loader" class="loader"></div>
-    <div id="iconBox" class="icon-box">
-        <span id="successIcon" class="success-icon">✅</span>
-        <span id="errorIcon" class="error-icon">❌</span>
+        <div class="rate-badge">💡 อัตราการแลก: 1 แต้ม = 1 บาท</div>
+
+        <div class="input-group">
+            <input type="number" id="manualAmount" class="manual-input" placeholder="ระบุแต้มเอง">
+            <button class="btn-confirm" onclick="handleManual()">ยืนยัน</button>
+        </div>
+
+        <div class="grid-container">
+            <button class="btn-quick" onclick="checkAndScan(20)">20</button>
+            <button class="btn-quick" onclick="checkAndScan(30)">30</button>
+            <button class="btn-quick" onclick="checkAndScan(40)">40</button>
+            <button class="btn-quick" onclick="checkAndScan(50)">50</button>
+            <button class="btn-quick" onclick="checkAndScan(60)">60</button>
+            <button class="btn-quick" onclick="checkAndScan(70)">70</button>
+            <button class="btn-quick" onclick="checkAndScan(80)">80</button>
+            <button class="btn-quick" onclick="checkAndScan(90)">90</button>
+            <button class="btn-quick" onclick="checkAndScan(100)">100</button>
+        </div>
+
+        <div id="errorDisplay" class="error-msg"></div>
     </div>
-    <div id="statusText" class="status-text">กำลังประมวลผล...</div>
-    <div id="detailText" class="detail-text">กรุณารอสักครู่ ระบบกำลังสื่อสารกับเครื่อง</div>
-    <button id="btnClose" class="btn-close" onclick="liff.closeWindow()">ปิดหน้าต่าง</button>
-</div>
+
+    <div id="loadingOverlay">
+        <div class="spinner"></div>
+        <p style="margin-top:20px; font-weight:bold; color:#555;" id="loadingText">กำลังประมวลผล...</p>
+    </div>
+
+    <div id="processMode" class="card" style="display:none;">
+        <h2>สถานะรายการ</h2>
+        <div style="font-size:3rem; margin:20px 0;" id="statusIcon">⏳</div>
+        <p id="statusText" style="font-size:1.2rem;">กำลังตรวจสอบ...</p>
+        <button onclick="liff.closeWindow()" style="background:#555; color:white; border:none; padding:10px 30px; border-radius:20px; margin-top:20px;">ปิดหน้าต่าง</button>
+    </div>
 
 <script>
-    // ⚠️ ใส่ LIFF ID เดิมของ Boss ได้เลยครับ
+    // ⚠️ ใส่ LIFF ID ของจริงที่นี่
     const LIFF_ID = "2009026941-FsGWN6uS"; 
+    
+    let currentPoints = 0;
+    let userProfile = null;
+
+    // 🛡️ ดัก Error ให้ออกหน้าจอ (แก้ปัญหาจอดับบนมือถือ)
+    window.onerror = function (msg, url, line) {
+        document.getElementById('errorDisplay').innerText = `Error: ${msg} (Line: ${line})`;
+        return false;
+    };
 
     async function main() {
         try {
             await liff.init({ liffId: LIFF_ID });
             if (!liff.isLoggedIn()) { liff.login(); return; }
 
-            // เช็ก URL ว่ามี parameter ไหม?
+            userProfile = await liff.getProfile();
+            
+            // เช็ก URL ว่าเป็นแบบเก่า (รับแต้ม) หรือแบบใหม่ (Dashboard)
             const urlParams = new URLSearchParams(window.location.search);
-            const action = urlParams.get('action');
-            const token = urlParams.get('token');
-
-            if (action || token) {
-                // 👉 ถ้ามี -> แสดงหน้า Process (Logic เก่าของ Boss ทำงานตรงนี้)
+            if (urlParams.get('token')) {
+                // 👉 เข้าโหมดรับแต้ม (Logic เก่า)
+                document.getElementById('dashboardMode').style.display = 'none';
                 document.getElementById('processMode').style.display = 'block';
-                await runOldProcessLogic(urlParams);
+                await handleReceivePoints(urlParams.get('token'));
             } else {
-                // 👉 ถ้าไม่มี -> แสดงหน้า Dashboard (ดูแต้ม)
-                document.getElementById('dashboardMode').style.display = 'block';
-                await loadPoints();
+                // 👉 เข้าโหมด Dashboard (Calculator)
+                await fetchPoints();
             }
 
         } catch (err) {
-            alert("LIFF Error: " + err.message);
+            document.getElementById('errorDisplay').innerText = "Init Failed: " + err.message;
         }
     }
 
-    // -----------------------------------------------------
-    // 🟡 ฟังก์ชัน 1: ของเก่าของ Boss (รับแต้ม / ใช้แต้ม)
-    // -----------------------------------------------------
-    async function runOldProcessLogic(urlParams) {
+    // ดึงแต้ม
+    async function fetchPoints() {
         try {
-            const profile = await liff.getProfile();
-            const userId = profile.userId;
-            
-            const action = urlParams.get('action');
-            const token = urlParams.get('token');
-            const amount = urlParams.get('amount');
-            const machine_id = urlParams.get('machine_id');
+            const res = await axios.get(`/api/get-user-points?userId=${userProfile.userId}`);
+            currentPoints = parseInt(res.data.points);
+            document.getElementById('userPoints').innerText = currentPoints;
+        } catch (err) {
+            document.getElementById('errorDisplay').innerText = "โหลดแต้มไม่สำเร็จ";
+        }
+    }
 
-            let apiUrl = "";
-            
-            // 👇 นี่ไงครับ Logic เก่าที่ Boss ถามหา อยู่ครบถ้วน!
-            if (action === "use") {
-                // --- ฝั่งหักแต้ม (Redeem) ---
-                document.getElementById('statusText').innerText = "กำลังหักแต้ม...";
-                apiUrl = `/liff/redeem-execute?userId=${userId}&amount=${amount}&machine_id=${machine_id}`;
-            } else {
-                // --- ฝั่งรับแต้ม (Consume) ---
-                document.getElementById('statusText').innerText = "กำลังสะสมแต้ม...";
-                apiUrl = `/liff/consume?token=${token}&userId=${userId}`;
+    // 1. ฟังก์ชันกดปุ่ม "ยืนยัน" (กรอกเอง)
+    function handleManual() {
+        const val = document.getElementById('manualAmount').value;
+        if (!val) return showError("กรุณาระบุแต้ม");
+        checkAndScan(parseInt(val));
+    }
+
+    // 2. ฟังก์ชันหลัก: เช็กแต้ม -> เปิดกล้อง
+    async function checkAndScan(amount) {
+        showError(""); // เคลียร์ Error
+
+        // Validations
+        if (isNaN(amount) || amount <= 0) return showError("ยอดเงินไม่ถูกต้อง");
+        if (amount > currentPoints) return showError(`แต้มไม่พอ! (ขาด ${amount - currentPoints} แต้ม)`);
+
+        // ถ้าผ่านหมด -> เปิดกล้อง
+        try {
+            if (!liff.isInClient()) {
+                alert(`[จำลอง] สแกน QR เพื่อจ่าย ${amount} แต้ม`);
+                return;
             }
 
-            const response = await fetch(apiUrl);
-            const result = await response.text();
-
-            document.getElementById('loader').style.display = 'none';
-            document.getElementById('btnClose').style.display = 'inline-block';
-
-            if (response.ok) {
-                document.getElementById('successIcon').style.display = 'inline';
-                document.getElementById('statusText').innerText = "สำเร็จเรียบร้อย!";
-                document.getElementById('detailText').innerText = result;
-            } else {
-                document.getElementById('errorIcon').style.display = 'inline';
-                document.getElementById('statusText').innerText = "เกิดข้อผิดพลาด";
-                document.getElementById('detailText').innerText = result;
-            }
-        } catch (err) {
-            document.getElementById('loader').style.display = 'none';
-            document.getElementById('statusText').innerText = "System Error";
-            document.getElementById('detailText').innerText = err.message;
-        }
-    }
-
-    // -----------------------------------------------------
-    // 🟢 ฟังก์ชัน 2: ของใหม่ (ดูแต้ม + ปุ่มสแกน)
-    // -----------------------------------------------------
-    async function loadPoints() {
-        try {
-            const profile = await liff.getProfile();
-            const response = await fetch(`/api/get-user-points?userId=${profile.userId}`);
-            const data = await response.json();
-            document.getElementById('userPoints').innerText = data.points;
-        } catch (err) {
-            document.getElementById('dashStatus').innerText = "โหลดแต้มไม่สำเร็จ";
-        }
-    }
-
-    async function startScan() {
-        if (!liff.isInClient()) { alert("ต้องเปิดใน LINE เท่านั้น"); return; }
-        try {
             const result = await liff.scanCodeV2();
             if (result.value) {
-                const qrText = result.value;
-                // ถ้าสแกนเจอ QR ที่เป็น LIFF Link -> ให้วิ่งไปที่ลิงก์นั้นเลย (เข้า Logic เก่า)
-                if (qrText.includes("liff.line.me")) {
-                    window.location.href = qrText;
-                } else {
-                    alert("QR Code ไม่ถูกต้อง: " + qrText);
+                // ⚠️ Logic สำคัญ: QR ที่ตู้ ควรจะเป็นแค่ชื่อเครื่อง เช่น "MCTE01"
+                // หรือถ้า QR เป็น URL ยาวๆ ก็ต้องตัดคำเอาเฉพาะ ID เครื่อง
+                const scannedText = result.value; 
+                let machineId = scannedText.trim(); // สมมติว่า QR คือ "MCTE01"
+
+                // ถ้า QR มาเป็น URL (เผื่อไว้)
+                if (machineId.includes("machine_id=")) {
+                    machineId = machineId.split("machine_id=")[1].split("&")[0];
                 }
+
+                // ส่งไปตัดแต้ม
+                await executeRedeem(amount, machineId);
             }
         } catch (err) {
-            alert("Scan Error: " + err);
+            showError("เปิดกล้องไม่ได้ หรือยกเลิกการสแกน");
         }
+    }
+
+    // 3. ยิง API ตัดแต้ม
+    async function executeRedeem(amount, machineId) {
+        showLoading(true, `กำลังสั่งเครื่อง ${machineId}...`);
+        try {
+            await axios.get(`/liff/redeem-execute?userId=${userProfile.userId}&amount=${amount}&machine_id=${machineId}`);
+            
+            showLoading(false);
+            alert(`✅ สำเร็จ!\nหัก ${amount} แต้ม\nเครื่อง ${machineId} เริ่มทำงานแล้ว`);
+            liff.closeWindow();
+
+        } catch (err) {
+            showLoading(false);
+            alert("❌ เกิดข้อผิดพลาด: " + (err.response?.data || err.message));
+            fetchPoints(); // โหลดแต้มใหม่เผื่อพลาด
+        }
+    }
+
+    // ฟังก์ชันรับแต้ม (Logic เก่า)
+    async function handleReceivePoints(token) {
+        try {
+            document.getElementById('statusText').innerText = "กำลังสะสมแต้ม...";
+            const res = await axios.get(`/liff/consume?token=${token}&userId=${userProfile.userId}`);
+            
+            document.getElementById('statusIcon').innerText = "✅";
+            document.getElementById('statusText').innerText = "สะสมแต้มสำเร็จ!";
+        } catch (err) {
+            document.getElementById('statusIcon').innerText = "❌";
+            document.getElementById('statusText').innerText = "รับแต้มไม่สำเร็จ (QR อาจถูกใช้แล้ว)";
+        }
+    }
+
+    // Helper UI
+    function showError(msg) {
+        document.getElementById('errorDisplay').innerText = msg;
+    }
+    function showLoading(isShow, text = "") {
+        const overlay = document.getElementById('loadingOverlay');
+        document.getElementById('loadingText').innerText = text;
+        overlay.style.display = isShow ? 'flex' : 'none';
     }
 
     main();
