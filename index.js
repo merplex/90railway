@@ -9,7 +9,6 @@ const axios = require("axios");
 const { Pool } = require("pg");
 
 const app = express();
-// เปิดให้ Server อ่านไฟล์ในโฟลเดอร์ public (ต้องมี index.html ในนั้น)
 app.use(cors(), express.json(), express.static("public"));
 
 const pool = new Pool({
@@ -21,10 +20,8 @@ let adminWaitList = new Set();
 let ratioWaitList = new Set(); 
 
 /* ============================================================
-   1. API SYSTEM (สร้าง QR, เช็กแต้ม, ตัดแต้ม)
+   1. API SYSTEM
 ============================================================ */
-
-// สร้าง QR Code สำหรับแจกแต้ม (Earn)
 app.post("/create-qr", async (req, res) => {
     try {
         const { amount, machine_id } = req.body;
@@ -45,7 +42,6 @@ app.post("/create-qr", async (req, res) => {
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-// API ให้หน้า index.html ดึงแต้มไปโชว์
 app.get("/api/get-user-points", async (req, res) => {
     const { userId } = req.query;
     try {
@@ -57,7 +53,6 @@ app.get("/api/get-user-points", async (req, res) => {
     } catch (e) { res.status(500).json({ points: 0 }); }
 });
 
-// ลิงก์รับแต้ม (Scan QR)
 app.get("/liff/consume", async (req, res) => {
   try {
     const { token, userId } = req.query;
@@ -88,7 +83,6 @@ app.get("/liff/consume", async (req, res) => {
   } catch (err) { res.status(500).send(err.message); }
 });
 
-// ลิงก์หักแต้ม (Redeem)
 app.get("/liff/redeem-execute", async (req, res) => {
   try {
     let { userId, amount, machine_id } = req.query;
@@ -135,15 +129,16 @@ app.post("/webhook", async (req, res) => {
     try {
       if (userMsg === "USER_LINE") return await sendReply(event.replyToken, `ID: ${userId}`);
       
+      // ✅ เพิ่มตรงนี้ครับ: ถ้าลูกค้าพิมพ์ REDEEM_POINT (หรือกดปุ่ม) ให้ส่ง Link ไปให้กด
+      if (userMsg === "REDEEM_POINT") return await sendRedeemLink(event.replyToken);
+
       if (isUserAdmin) {
         if (ratioWaitList.has(userId)) { ratioWaitList.delete(userId); return await updateExchangeRatio(rawMsg, event.replyToken); }
         if (adminWaitList.has(userId)) { adminWaitList.delete(userId); return await addNewAdmin(rawMsg, event.replyToken); }
         
-        // เมนู Admin
         if (userMsg === "ADMIN") return await sendAdminDashboard(event.replyToken);
         if (userMsg === "REPORT") return await sendReportMenu(event.replyToken);
         
-        // เมนู Report ย่อย
         if (userMsg === "SUB_PENDING") return await listSubReport(event.replyToken, "PENDING");
         if (userMsg === "SUB_EARNS") return await listSubReport(event.replyToken, "EARNS");
         if (userMsg === "SUB_REDEEMS") return await listSubReport(event.replyToken, "REDEEMS");
@@ -156,7 +151,6 @@ app.post("/webhook", async (req, res) => {
         if (userMsg.startsWith("GET_HISTORY ")) return await sendUserHistory(rawMsg.split(" ")[1], event.replyToken);
       }
 
-      // ระบบขอแต้ม
       const pointMatch = rawMsg.match(/^(\d+)\s*(แต้ม|คะแนน|p|point|pts)?$/i);
       if (pointMatch) {
           const points = parseInt(pointMatch[1]);
@@ -236,26 +230,27 @@ async function approveSpecificPoint(rid, rt) {
     await sendReplyPush(req.line_user_id, `🎊 แอดมินอนุมัติ ${req.points} แต้มแล้วค่ะ`);
 }
 
-// ✨ REPORT SYSTEM (สวยงาม + ตัวเล็ก + บรรทัดชิด)
-// ⚠️ สำคัญ: createRow ต้องอยู่ "ก่อน" listSubReport เพื่อไม่ให้ Error
+// ✅ 1. แก้ไข Layout: เพิ่มพื้นที่ Machine ID (flex: 3), ลด User ID (flex: 3)
 const createRow = (machine, uid, pts, time, color, fullUid) => ({
     type: "box", 
     layout: "horizontal", 
-    margin: "none",       // 🟢 ลดช่องว่างระหว่างบรรทัดให้ชิดสุด
+    margin: "none",
     spacing: "xs",        
     alignItems: "center",
     contents: [
-        { type: "text", text: `[${machine || "?"}]`, size: "xxs", flex: 2, color: "#aaaaaa" },
+        // เพิ่ม Flex เป็น 3 (กว้างขึ้น)
+        { type: "text", text: `[${machine || "?"}]`, size: "xxs", flex: 3, color: "#888888" },
+        // ลด Flex เป็น 3 (แคบลง), ใช้ substring(0,6) เพื่อไม่ให้ล้น
         { 
             type: "text", 
-            text: uid, 
-            size: "xxs",      // 🟢 บังคับตัวเล็กเท่าเพื่อน
-            flex: 4, 
+            text: uid.substring(0,6) + "..", 
+            size: "xxs",      
+            flex: 3, 
             color: "#4267B2", 
-            decoration: "underline", // ขีดเส้นใต้ให้รู้ว่ากดได้
-            action: { type: "message", label: uid, text: `GET_HISTORY ${fullUid}` } // ส่ง ID เต็มไปดูประวัติ
+            decoration: "underline",
+            action: { type: "message", label: uid, text: `GET_HISTORY ${fullUid}` } 
         },
-        { type: "text", text: pts, size: "xxs", flex: 2, color: color, align: "end", weight: "bold" },
+        { type: "text", text: pts + ' ', size: "xxs", flex: 2, color: color, align: "end", weight: "bold" },
         { type: "text", text: new Date(time).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }), size: "xxs", flex: 2, align: "end", color: "#cccccc" }
     ]
 });
@@ -281,13 +276,11 @@ async function listSubReport(replyToken, type) {
         } else if (type === "EARNS") {
             title = "📥 Recent Earns"; color = "#00b900";
             const res = await pool.query('SELECT * FROM "qrPointToken" WHERE is_used = true ORDER BY used_at DESC LIMIT 15');
-            // ส่ง e.used_by เป็นตัวแปรสุดท้าย (Full ID)
             rows = res.rows.map(e => createRow(e.machine_id, e.used_by.substring(0,8), `+${e.point_get}p`, e.used_at, "#00b900", e.used_by));
 
         } else if (type === "REDEEMS") {
             title = "📤 Recent Redeems"; color = "#ff9f00";
             const res = await pool.query(`SELECT r.*, m.line_user_id FROM "redeemlogs" r JOIN "ninetyMember" m ON r.member_id = m.id ORDER BY r.created_at DESC LIMIT 15`);
-            // ส่ง r.line_user_id เป็นตัวแปรสุดท้าย (Full ID)
             rows = res.rows.map(r => createRow(r.machine_id, r.line_user_id.substring(0,8), `-${r.points_redeemed}p`, r.created_at, "#ff4b4b", r.line_user_id));
         }
         
@@ -299,7 +292,7 @@ async function listSubReport(replyToken, type) {
             body: { 
                 type: "box", 
                 layout: "vertical", 
-                spacing: "none", // 🟢 กำจัดช่องว่างระหว่างบรรทัดให้หมด
+                spacing: "none",
                 contents: rows 
             } 
         });
@@ -314,6 +307,23 @@ async function sendReplyPush(to, text) {
 }
 async function sendFlex(rt, alt, contents) { 
     try { await axios.post("https://api.line.me/v2/bot/message/reply", { replyToken: rt, messages: [{ type: "flex", altText: alt, contents }] }, { headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` }}); } catch (e) { console.error(e.response?.data); }
+}
+
+// ✅ ฟังก์ชันส่ง Link ให้กด เมื่อพิมพ์ REDEEM_POINT
+async function sendRedeemLink(rt) {
+    const liffUrl = `https://liff.line.me/${process.env.LIFF_ID}`;
+    const flex = {
+        type: "bubble",
+        body: {
+            type: "box", layout: "vertical", spacing: "md",
+            contents: [
+                { type: "text", text: "📱 แลกแต้มซักผ้า", weight: "bold", size: "lg", align: "center", color: "#00b900" },
+                { type: "text", text: "กดปุ่มด้านล่างเพื่อเปิดเมนูแลกแต้ม", size: "xs", align: "center", color: "#888888" },
+                { type: "button", style: "primary", color: "#00b900", action: { type: "uri", label: "เปิดเมนูแลกแต้ม", uri: liffUrl } }
+            ]
+        }
+    };
+    await sendFlex(rt, "Redeem Menu", flex);
 }
 
 async function sendAdminDashboard(rt) {
@@ -380,8 +390,8 @@ async function sendUserHistory(targetUid, rt) {
             header: { type: "box", layout: "vertical", backgroundColor: "#333333", contents: [{ type: "text", text: `📜 HISTORY: ${targetUid.substring(0,8)}...`, color: "#ffffff", weight: "bold", size: "xs" }] },
             body: { type: "box", layout: "vertical", spacing: "sm", contents: finalHistory.map(tx => ({
                 type: "box", layout: "horizontal", contents: [
-                    { type: "text", text: tx.label, size: "xxs", flex: 6, color: "#555555", weight: "bold" },
-                    { type: "text", text: tx.pts+' ', size: "xs", flex: 4, weight: "bold", color: tx.color, align: "end" },
+                    { type: "text", text: tx.label, size: "xxs", flex: 5, color: "#555555", weight: "bold" },
+                    { type: "text", text: tx.pts, size: "xs", flex: 4, weight: "bold", color: tx.color, align: "end" },
                     { type: "text", text: new Date(tx.time).toLocaleDateString('th-TH') , size: "xxs", flex: 3, align: "end", color: "#aaaaaa" }
                 ]
             })) }
