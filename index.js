@@ -58,25 +58,11 @@ app.get("/liff/consume", async (req, res) => {
     const { token, userId } = req.query;
     const qrRes = await pool.query('SELECT * FROM "qrPointToken" WHERE qr_token = $1', [token]);
     const qrData = qrRes.rows[0];
-
     if (!qrData || qrData.is_used) return res.status(400).send("QR Invalid");
-
     await pool.query('UPDATE "qrPointToken" SET is_used = true, used_by = $1, used_at = NOW() WHERE qr_token = $2', [userId, token]);
-
     let memRes = await pool.query('SELECT id FROM "ninetyMember" WHERE line_user_id = $1', [userId]);
-    let memberId;
-    if (memRes.rows.length === 0) {
-        const newMem = await pool.query('INSERT INTO "ninetyMember" (line_user_id) VALUES ($1) RETURNING id', [userId]);
-        memberId = newMem.rows[0].id;
-    } else {
-        memberId = memRes.rows[0].id;
-    }
-
-    await pool.query(`
-        INSERT INTO "memberWallet" (member_id, point_balance) VALUES ($1, $2)
-        ON CONFLICT (member_id) DO UPDATE SET point_balance = "memberWallet".point_balance + $2
-        RETURNING point_balance`, [memberId, qrData.point_get]);
-
+    let memberId = memRes.rows.length === 0 ? (await pool.query('INSERT INTO "ninetyMember" (line_user_id) VALUES ($1) RETURNING id', [userId])).rows[0].id : memRes.rows[0].id;
+    await pool.query(`INSERT INTO "memberWallet" (member_id, point_balance) VALUES ($1, $2) ON CONFLICT (member_id) DO UPDATE SET point_balance = "memberWallet".point_balance + $2`, [memberId, qrData.point_get]);
     const newBalanceRes = await pool.query('SELECT point_balance FROM "memberWallet" WHERE member_id = $1', [memberId]);
     await sendReplyPush(userId, `✨ สะสมสำเร็จ! +${qrData.point_get} แต้ม (รวม: ${newBalanceRes.rows[0].point_balance})`);
     res.send("SUCCESS");
@@ -86,30 +72,18 @@ app.get("/liff/consume", async (req, res) => {
 app.get("/liff/redeem-execute", async (req, res) => {
   try {
     let { userId, amount, machine_id } = req.query;
-    
     const memRes = await pool.query('SELECT id FROM "ninetyMember" WHERE line_user_id = $1', [userId]);
     const member = memRes.rows[0];
     if (!member) return res.status(400).send("ไม่พบข้อมูลสมาชิก");
-
     const wallRes = await pool.query('SELECT point_balance FROM "memberWallet" WHERE member_id = $1', [member.id]);
     const wallet = wallRes.rows[0];
-
     if (!wallet || wallet.point_balance < amount) return res.status(400).send("แต้มไม่พอ");
-
     const newBalance = wallet.point_balance - amount;
     await pool.query('UPDATE "memberWallet" SET point_balance = $1 WHERE member_id = $2', [newBalance, member.id]);
-
-    await pool.query(
-        'INSERT INTO "redeemlogs" (member_id, machine_id, points_redeemed, status, created_at) VALUES ($1, $2, $3, $4, NOW())',
-        [member.id, machine_id, parseInt(amount), "pending"]
-    );
-
+    await pool.query('INSERT INTO "redeemlogs" (member_id, machine_id, points_redeemed, status, created_at) VALUES ($1, $2, $3, $4, NOW())', [member.id, machine_id, parseInt(amount), "success"]);
     await sendReplyPush(userId, `✅ แลกสำเร็จ! -${amount} แต้ม (เหลือ: ${newBalance})`);
     res.send(`SUCCESS: MACHINE_${machine_id}_START`);
-  } catch (err) { 
-    console.error(err);
-    res.status(500).send("System Error: " + err.message); 
-  }
+  } catch (err) { res.status(500).send("System Error: " + err.message); }
 });
 
 /* ============================================================
@@ -118,31 +92,22 @@ app.get("/liff/redeem-execute", async (req, res) => {
 app.post("/webhook", async (req, res) => {
   const events = req.body.events;
   if (!events) return res.sendStatus(200);
-
   for (let event of events) {
     const userId = event.source.userId;
     const isUserAdmin = await isAdmin(userId);
     if (event.type !== "message" || event.message.type !== "text") continue;
     const rawMsg = event.message.text.trim();
     const userMsg = rawMsg.toUpperCase();
-
     try {
       if (userMsg === "USER_LINE") return await sendReply(event.replyToken, `ID: ${userId}`);
-      
-      // ✅ เพิ่มตรงนี้ครับ: ถ้าลูกค้าพิมพ์ REDEEM_POINT (หรือกดปุ่ม) ให้ส่ง Link ไปให้กด
-      if (userMsg === "REDEEM_POINT") return await sendRedeemLink(event.replyToken);
-
       if (isUserAdmin) {
         if (ratioWaitList.has(userId)) { ratioWaitList.delete(userId); return await updateExchangeRatio(rawMsg, event.replyToken); }
         if (adminWaitList.has(userId)) { adminWaitList.delete(userId); return await addNewAdmin(rawMsg, event.replyToken); }
-        
         if (userMsg === "ADMIN") return await sendAdminDashboard(event.replyToken);
         if (userMsg === "REPORT") return await sendReportMenu(event.replyToken);
-        
         if (userMsg === "SUB_PENDING") return await listSubReport(event.replyToken, "PENDING");
         if (userMsg === "SUB_EARNS") return await listSubReport(event.replyToken, "EARNS");
         if (userMsg === "SUB_REDEEMS") return await listSubReport(event.replyToken, "REDEEMS");
-        
         if (userMsg === "LIST_ADMIN") return await listAdminsWithDelete(event.replyToken);
         if (userMsg === "SET_RATIO_STEP1") { ratioWaitList.add(userId); return await sendReply(event.replyToken, "📊 ระบุ บาท:แต้ม (เช่น 10:1)"); }
         if (userMsg === "ADD_ADMIN_STEP1") { adminWaitList.add(userId); return await sendReply(event.replyToken, "🆔 ส่ง ID เว้นวรรคตามด้วยชื่อ"); }
@@ -150,29 +115,8 @@ app.post("/webhook", async (req, res) => {
         if (userMsg.startsWith("APPROVE_ID ")) return await approveSpecificPoint(rawMsg.split(" ")[1], event.replyToken);
         if (userMsg.startsWith("GET_HISTORY ")) return await sendUserHistory(rawMsg.split(" ")[1], event.replyToken);
       }
-
-      const pointMatch = rawMsg.match(/^(\d+)\s*(แต้ม|คะแนน|p|point|pts)?$/i);
-      if (pointMatch) {
-          const points = parseInt(pointMatch[1]);
-          const pendingCheck = await pool.query(
-              `SELECT request_at FROM point_requests WHERE line_user_id = $1 AND request_at > NOW() - INTERVAL '24 hours'`, 
-              [userId]
-          );
-
-          if (pendingCheck.rows.length > 0) {
-              const lastTime = new Date(pendingCheck.rows[0].request_at).toLocaleTimeString('th-TH', {hour: '2-digit', minute:'2-digit'});
-              return await sendReply(event.replyToken, `⏳ คุณมีรายการขอแต้มค้างอยู่ (ตั้งแต่ ${lastTime})\nเจ้าหน้าที่กำลังตรวจสอบ รอก่อนนะคะ 🥺`);
-          }
-
-          await pool.query('INSERT INTO point_requests (line_user_id, points, request_at) VALUES ($1, $2, NOW())', [userId, points]);
-          return await sendReply(event.replyToken, `📝 ส่งคำขอ ${points} แต้ม เรียบร้อยค่ะ`);
-      }
-
       if (userMsg === "CHECK_POINT") {
-          const resDb = await pool.query(`
-            SELECT w.point_balance FROM "memberWallet" w 
-            JOIN "ninetyMember" m ON w.member_id = m.id 
-            WHERE m.line_user_id = $1`, [userId]);
+          const resDb = await pool.query(`SELECT w.point_balance FROM "memberWallet" w JOIN "ninetyMember" m ON w.member_id = m.id WHERE m.line_user_id = $1`, [userId]);
           await sendReply(event.replyToken, `🌟 ยอดแต้มของคุณ: ${resDb.rows[0]?.point_balance || 0} แต้ม`);
       }
     } catch (e) { console.error("Webhook Error:", e); }
@@ -181,21 +125,27 @@ app.post("/webhook", async (req, res) => {
 });
 
 /* ============================================================
+   🎨 HELPER - สร้างแถวรายงาน (Machine กว้างขึ้น / User สั้นลง)
+============================================================ */
+const createRow = (machine, uid, pts, time, color, fullUid) => ({
+    type: "box", layout: "horizontal", margin: "none", spacing: "xs", alignItems: "center",
+    contents: [
+        { type: "text", text: `[${machine || "?"}]`, size: "xxs", flex: 3, color: "#888888" },
+        { type: "text", text: uid.substring(0,8), size: "xxs", flex: 3, color: "#4267B2", decoration: "underline", action: { type: "message", label: uid, text: `GET_HISTORY ${fullUid}` } },
+        { type: "text", text: pts + '   ', size: "xxs", flex: 2, color: color, align: "end", weight: "bold" },
+        { type: "text", text: new Date(time).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }), size: "xxs", flex: 2, align: "end", color: "#cccccc" }
+    ]
+});
+
+/* ============================================================
    3. FUNCTIONS & HELPERS
 ============================================================ */
-async function isAdmin(uid) { 
-    const res = await pool.query('SELECT line_user_id FROM bot_admins WHERE line_user_id = $1', [uid]);
-    return res.rows.length > 0; 
-}
+async function isAdmin(uid) { const res = await pool.query('SELECT line_user_id FROM bot_admins WHERE line_user_id = $1', [uid]); return res.rows.length > 0; }
 
 async function updateExchangeRatio(input, rt) {
     const parts = input.split(":");
     if (parts.length !== 2) return await sendReply(rt, "❌ รูปแบบผิด! เช่น 10:1");
-    await pool.query(`
-        INSERT INTO system_configs (config_key, baht_val, point_val, updated_at) 
-        VALUES ('exchange_ratio', $1, $2, NOW())
-        ON CONFLICT (config_key) DO UPDATE SET baht_val = $1, point_val = $2, updated_at = NOW()`,
-        [parseInt(parts[0]), parseInt(parts[1])]);
+    await pool.query(`INSERT INTO system_configs (config_key, baht_val, point_val, updated_at) VALUES ('exchange_ratio', $1, $2, NOW()) ON CONFLICT (config_key) DO UPDATE SET baht_val = $1, point_val = $2, updated_at = NOW()`, [parseInt(parts[0]), parseInt(parts[1])]);
     await sendReply(rt, `✅ ตั้งค่าสำเร็จ! ${parts[0]} บาท : ${parts[1]} แต้ม`);
 }
 
@@ -205,199 +155,71 @@ async function addNewAdmin(input, rt) {
     await sendReply(rt, `✅ เพิ่มแอดมินสำเร็จ!`);
 }
 
-async function approveSpecificPoint(rid, rt) {
-    const reqRes = await pool.query('SELECT * FROM point_requests WHERE id = $1', [rid]);
-    const req = reqRes.rows[0];
-    if (!req) return;
+async function deleteAdmin(tid, rt) { await pool.query('DELETE FROM bot_admins WHERE line_user_id = $1', [tid]); await sendReply(rt, "🗑️ ลบแอดมินเรียบร้อยแล้วค่ะ"); }
 
-    let memRes = await pool.query('SELECT id FROM "ninetyMember" WHERE line_user_id = $1', [req.line_user_id]);
-    let memberId = memRes.rows[0]?.id;
-    if (!memberId) {
-        const newM = await pool.query('INSERT INTO "ninetyMember" (line_user_id) VALUES ($1) RETURNING id', [req.line_user_id]);
-        memberId = newM.rows[0].id;
-    }
-
-    await pool.query(`
-        INSERT INTO "memberWallet" (member_id, point_balance) VALUES ($1, $2)
-        ON CONFLICT (member_id) DO UPDATE SET point_balance = "memberWallet".point_balance + $2`,
-        [memberId, req.points]);
-
-    await pool.query('INSERT INTO "qrPointToken" (qr_token, point_get, machine_id, is_used, used_by, used_at, create_at) VALUES ($1, $2, $3, $4, $5, NOW(), NOW())',
-        [`MANUAL-${crypto.randomUUID()}`, req.points, 'ADMIN', true, req.line_user_id]);
-
-    await pool.query('DELETE FROM point_requests WHERE id = $1', [rid]);
-    await sendReply(rt, `✅ อนุมัติสำเร็จ!`);
-    await sendReplyPush(req.line_user_id, `🎊 แอดมินอนุมัติ ${req.points} แต้มแล้วค่ะ`);
+async function listAdminsWithDelete(rt) {
+  const res = await pool.query('SELECT * FROM bot_admins');
+  const adminRows = res.rows.map(a => ({ type: "box", layout: "horizontal", margin: "md", alignItems: "center", contents: [{ type: "text", text: `👤 ${a.admin_name}`, size: "sm", flex: 5 }, { type: "button", style: "primary", color: "#ff4b4b", height: "sm", flex: 2, action: { type: "message", label: "DEL", text: `DEL_ADMIN_ID ${a.line_user_id}` } }] }));
+  await sendFlex(rt, "Admin List", { type: "bubble", body: { type: "box", layout: "vertical", contents: [{ type: "text", text: "🔐 ADMIN LIST", weight: "bold", size: "lg" }, ...adminRows] } });
 }
-
-// ✅ 1. แก้ไข Layout: เพิ่มพื้นที่ Machine ID (flex: 3), ลด User ID (flex: 3)
-const createRow = (machine, uid, pts, time, color, fullUid) => ({
-    type: "box", 
-    layout: "horizontal", 
-    margin: "none",
-    spacing: "xs",        
-    alignItems: "center",
-    contents: [
-        // เพิ่ม Flex เป็น 3 (กว้างขึ้น)
-        { type: "text", text: `[${machine || "?"}]`, size: "xxs", flex: 3, color: "#888888" },
-        // ลด Flex เป็น 3 (แคบลง), ใช้ substring(0,6) เพื่อไม่ให้ล้น
-        { 
-            type: "text", 
-            text: uid.substring(0,6) + "..", 
-            size: "xxs",      
-            flex: 3, 
-            color: "#4267B2", 
-            decoration: "underline",
-            action: { type: "message", label: uid, text: `GET_HISTORY ${fullUid}` } 
-        },
-        { type: "text", text: pts + ' ', size: "xxs", flex: 2, color: color, align: "end", weight: "bold" },
-        { type: "text", text: new Date(time).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }), size: "xxs", flex: 2, align: "end", color: "#cccccc" }
-    ]
-});
 
 async function listSubReport(replyToken, type) {
     try {
         let title = "", color = "", rows = [];
-        
         if (type === "PENDING") {
             title = "🔔 Pending (15)"; color = "#ff4b4b";
             const res = await pool.query('SELECT * FROM point_requests ORDER BY request_at DESC LIMIT 15');
-            rows = res.rows.map(r => ({
-                type: "box", layout: "horizontal", margin: "xs", alignItems: "center", contents: [
-                    { 
-                        type: "text", text: r.line_user_id.substring(0,6), size: "xxs", flex: 3, color: "#4267B2", decoration: "underline",
-                        action: { type: "message", label: r.line_user_id, text: `GET_HISTORY ${r.line_user_id}` }
-                    },
-                    { type: "text", text: `+${r.points}p`, size: "xxs", flex: 2, color: "#00b900", weight: "bold" },
-                    { type: "button", style: "secondary", height: "sm", action: { type: "message", label: "อนุมัติ", text: `APPROVE_ID ${r.id}` }, flex: 3 }
-                ]
-            }));
-
+            rows = res.rows.map(r => ({ type: "box", layout: "horizontal", margin: "xs", alignItems: "center", contents: [{ type: "text", text: r.line_user_id.substring(0,6), size: "xxs", flex: 3, color: "#4267B2", action: { type: "message", label: r.line_user_id, text: `GET_HISTORY ${r.line_user_id}` } }, { type: "text", text: `+${r.points}p`, size: "xxs", flex: 2, color: "#00b900", weight: "bold" }, { type: "button", style: "secondary", height: "sm", action: { type: "message", label: "อนุมัติ", text: `APPROVE_ID ${r.id}` }, flex: 3 }] }));
         } else if (type === "EARNS") {
             title = "📥 Recent Earns"; color = "#00b900";
             const res = await pool.query('SELECT * FROM "qrPointToken" WHERE is_used = true ORDER BY used_at DESC LIMIT 15');
             rows = res.rows.map(e => createRow(e.machine_id, e.used_by.substring(0,8), `+${e.point_get}p`, e.used_at, "#00b900", e.used_by));
-
         } else if (type === "REDEEMS") {
             title = "📤 Recent Redeems"; color = "#ff9f00";
             const res = await pool.query(`SELECT r.*, m.line_user_id FROM "redeemlogs" r JOIN "ninetyMember" m ON r.member_id = m.id ORDER BY r.created_at DESC LIMIT 15`);
             rows = res.rows.map(r => createRow(r.machine_id, r.line_user_id.substring(0,8), `-${r.points_redeemed}p`, r.created_at, "#ff4b4b", r.line_user_id));
         }
-        
         if (rows.length === 0) return await sendReply(replyToken, "ℹ️ ไม่มีรายการ");
-        
-        await sendFlex(replyToken, title, { 
-            type: "bubble", 
-            header: { type: "box", layout: "vertical", backgroundColor: color, contents: [{ type: "text", text: title, color: "#ffffff", weight: "bold" }] }, 
-            body: { 
-                type: "box", 
-                layout: "vertical", 
-                spacing: "none",
-                contents: rows 
-            } 
-        });
+        await sendFlex(replyToken, title, { type: "bubble", header: { type: "box", layout: "vertical", backgroundColor: color, contents: [{ type: "text", text: title, color: "#ffffff", weight: "bold" }] }, body: { type: "box", layout: "vertical", spacing: "none", contents: rows } });
     } catch (e) { console.error(e); await sendReply(replyToken, "❌ Error: " + e.message); }
 }
 
-async function sendReply(rt, text) { 
-    try { await axios.post("https://api.line.me/v2/bot/message/reply", { replyToken: rt, messages: [{ type: "text", text }] }, { headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` }}); } catch (e) { console.error(e.response?.data); }
-}
-async function sendReplyPush(to, text) { 
-    try { await axios.post("https://api.line.me/v2/bot/message/push", { to, messages: [{ type: "text", text }] }, { headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` }}); } catch (e) { console.error(e.response?.data); }
-}
-async function sendFlex(rt, alt, contents) { 
-    try { await axios.post("https://api.line.me/v2/bot/message/reply", { replyToken: rt, messages: [{ type: "flex", altText: alt, contents }] }, { headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` }}); } catch (e) { console.error(e.response?.data); }
-}
-
-// ✅ ฟังก์ชันส่ง Link ให้กด เมื่อพิมพ์ REDEEM_POINT
-async function sendRedeemLink(rt) {
-    const liffUrl = `https://liff.line.me/${process.env.LIFF_ID}`;
-    const flex = {
-        type: "bubble",
-        body: {
-            type: "box", layout: "vertical", spacing: "md",
-            contents: [
-                { type: "text", text: "📱 แลกแต้มซักผ้า", weight: "bold", size: "lg", align: "center", color: "#00b900" },
-                { type: "text", text: "กดปุ่มด้านล่างเพื่อเปิดเมนูแลกแต้ม", size: "xs", align: "center", color: "#888888" },
-                { type: "button", style: "primary", color: "#00b900", action: { type: "uri", label: "เปิดเมนูแลกแต้ม", uri: liffUrl } }
-            ]
-        }
-    };
-    await sendFlex(rt, "Redeem Menu", flex);
-}
-
-async function sendAdminDashboard(rt) {
-  const flex = { type: "bubble", header: { type: "box", layout: "vertical", backgroundColor: "#1c1c1c", contents: [{ type: "text", text: "90 WASH ADMIN", color: "#00b900", weight: "bold", size: "xl" }] }, body: { type: "box", layout: "vertical", spacing: "md", contents: [{ type: "button", style: "primary", color: "#00b900", action: { type: "message", label: "📊 ACTIVITY REPORT", text: "REPORT" } }, { type: "button", style: "primary", color: "#ff9f00", action: { type: "message", label: "💰 SET EXCHANGE RATIO", text: "SET_RATIO_STEP1" } }] } };
-  await sendFlex(rt, "Admin Dashboard", flex);
-}
-
-async function sendReportMenu(rt) {
-  const flex = {
-    type: "bubble",
-    body: {
-      type: "box",
-      layout: "vertical",
-      spacing: "md",
-      contents: [
-        { type: "button", style: "primary", color: "#ff4b4b", action: { type: "message", label: "🔔 Pending Requests", text: "SUB_PENDING" } },
-        { type: "button", style: "primary", color: "#00b900", action: { type: "message", label: "📥 Recent Earns", text: "SUB_EARNS" } },
-        { type: "button", style: "primary", color: "#ff9f00", action: { type: "message", label: "📤 Recent Redeems", text: "SUB_REDEEMS" } }
-      ]
-    }
-  };
-  await sendFlex(rt, "Report Menu", flex);
-}
-
-async function deleteAdmin(tid, rt) {
-  await pool.query('DELETE FROM bot_admins WHERE line_user_id = $1', [tid]);
-  await sendReply(rt, "🗑️ ลบแอดมินเรียบร้อยแล้วค่ะ");
-}
-
-async function listAdminsWithDelete(rt) {
-  const res = await pool.query('SELECT * FROM bot_admins');
-  const adms = res.rows;
-  const adminRows = (adms || []).map(a => ({ 
-      type: "box", layout: "horizontal", margin: "md", alignItems: "center",
-      contents: [
-          { type: "text", text: `👤 ${a.admin_name}`, size: "sm", flex: 5, gravity: "center" }, 
-          { type: "button", style: "primary", color: "#ff4b4b", height: "sm", flex: 2, action: { type: "message", label: "DEL", text: `DEL_ADMIN_ID ${a.line_user_id}` } }
-      ] 
-  }));
-  await sendFlex(rt, "Admin List", { type: "bubble", body: { type: "box", layout: "vertical", contents: [{ type: "text", text: "🔐 ADMIN LIST", weight: "bold", size: "lg", margin: "md" }, ...adminRows] } });
+async function approveSpecificPoint(rid, rt) {
+    const reqRes = await pool.query('SELECT * FROM point_requests WHERE id = $1', [rid]);
+    const req = reqRes.rows[0]; if (!req) return;
+    let memRes = await pool.query('SELECT id FROM "ninetyMember" WHERE line_user_id = $1', [req.line_user_id]);
+    let memberId = memRes.rows.length === 0 ? (await pool.query('INSERT INTO "ninetyMember" (line_user_id) VALUES ($1) RETURNING id', [req.line_user_id])).rows[0].id : memRes.rows[0].id;
+    await pool.query('INSERT INTO "memberWallet" (member_id, point_balance) VALUES ($1, $2) ON CONFLICT (member_id) DO UPDATE SET point_balance = "memberWallet".point_balance + $2', [memberId, req.points]);
+    await pool.query('INSERT INTO "qrPointToken" (qr_token, point_get, machine_id, is_used, used_by, used_at, create_at) VALUES ($1, $2, $3, $4, $5, NOW(), NOW())', [`MANUAL-${crypto.randomUUID()}`, req.points, 'ADMIN', true, req.line_user_id]);
+    await pool.query('DELETE FROM point_requests WHERE id = $1', [rid]);
+    await sendReply(rt, `✅ อนุมัติสำเร็จ!`); await sendReplyPush(req.line_user_id, `🎊 แอดมินอนุมัติ ${req.points} แต้มแล้วค่ะ`);
 }
 
 async function sendUserHistory(targetUid, rt) {
     try {
         const earnsRes = await pool.query('SELECT * FROM "qrPointToken" WHERE used_by = $1 AND is_used = true ORDER BY used_at DESC LIMIT 15', [targetUid]);
         const memRes = await pool.query('SELECT id FROM "ninetyMember" WHERE line_user_id = $1', [targetUid]);
-        
-        let redeems = [];
-        if (memRes.rows[0]) {
-            const rdm = await pool.query('SELECT * FROM "redeemlogs" WHERE member_id = $1 ORDER BY created_at DESC LIMIT 15', [memRes.rows[0].id]);
-            redeems = rdm.rows;
-        }
-
-        let allTx = [
-            ...(earnsRes.rows || []).map(e => ({ label: `EARN[${e.machine_id || '-'}]`, pts: `+${e.point_get}`, time: e.used_at || e.create_at, color: "#00b900" })),
-            ...(redeems || []).map(u => ({ label: `REDEEM[${u.machine_id || '-'}]`, pts: `-${u.points_redeemed}`, time: u.created_at, color: "#ff4b4b" }))
-        ];
-
+        let redeems = memRes.rows[0] ? (await pool.query('SELECT * FROM "redeemlogs" WHERE member_id = $1 ORDER BY created_at DESC LIMIT 15', [memRes.rows[0].id])).rows : [];
+        let allTx = [...(earnsRes.rows || []).map(e => ({ label: `EARN[${e.machine_id || '-'}]`, pts: `+${e.point_get}`, time: e.used_at || e.create_at, color: "#00b900" })), ...(redeems || []).map(u => ({ label: `REDEEM[${u.machine_id || '-'}]`, pts: `-${u.points_redeemed}`, time: u.created_at, color: "#ff4b4b" }))];
         allTx.sort((a, b) => new Date(b.time) - new Date(a.time));
         const finalHistory = allTx.slice(0, 15);
-
-        const flex = {
-            type: "bubble",
-            header: { type: "box", layout: "vertical", backgroundColor: "#333333", contents: [{ type: "text", text: `📜 HISTORY: ${targetUid.substring(0,8)}...`, color: "#ffffff", weight: "bold", size: "xs" }] },
-            body: { type: "box", layout: "vertical", spacing: "sm", contents: finalHistory.map(tx => ({
-                type: "box", layout: "horizontal", contents: [
-                    { type: "text", text: tx.label, size: "xxs", flex: 5, color: "#555555", weight: "bold" },
-                    { type: "text", text: tx.pts, size: "xs", flex: 4, weight: "bold", color: tx.color, align: "end" },
-                    { type: "text", text: new Date(tx.time).toLocaleDateString('th-TH') , size: "xxs", flex: 3, align: "end", color: "#aaaaaa" }
-                ]
-            })) }
-        };
+        const flex = { type: "bubble", header: { type: "box", layout: "vertical", backgroundColor: "#333333", contents: [{ type: "text", text: `📜 HISTORY: ${targetUid.substring(0,8)}...`, color: "#ffffff", weight: "bold", size: "xs" }] }, body: { type: "box", layout: "vertical", spacing: "sm", contents: finalHistory.map(tx => ({ type: "box", layout: "horizontal", contents: [{ type: "text", text: tx.label, size: "xxs", flex: 5, color: "#555555", weight: "bold" }, { type: "text", text: tx.pts, size: "xs", flex: 4, weight: "bold", color: tx.color, align: "end" }, { type: "text", text: new Date(tx.time).toLocaleDateString('th-TH'), size: "xxs", flex: 3, align: "end", color: "#aaaaaa" }] })) } };
         await sendFlex(rt, "User History", flex);
     } catch (e) { console.error(e); await sendReply(rt, "❌ ไม่สามารถดึงประวัติได้ค่ะ"); }
+}
+
+async function sendReply(rt, text) { try { await axios.post("https://api.line.me/v2/bot/message/reply", { replyToken: rt, messages: [{ type: "text", text }] }, { headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` }}); } catch (e) { console.error(e.response?.data); } }
+async function sendReplyPush(to, text) { try { await axios.post("https://api.line.me/v2/bot/message/push", { to, messages: [{ type: "text", text }] }, { headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` }}); } catch (e) { console.error(e.response?.data); } }
+async function sendFlex(rt, alt, contents) { try { await axios.post("https://api.line.me/v2/bot/message/reply", { replyToken: rt, messages: [{ type: "flex", altText: alt, contents }] }, { headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` }}); } catch (e) { console.error(e.response?.data); } }
+
+async function sendAdminDashboard(rt) {
+  const flex = { type: "bubble", header: { type: "box", layout: "vertical", backgroundColor: "#1c1c1c", contents: [{ type: "text", text: "90 WASH ADMIN", color: "#00b900", weight: "bold", size: "xl" }] }, body: { type: "box", layout: "vertical", spacing: "md", contents: [{ type: "button", style: "primary", color: "#00b900", action: { type: "message", label: "📊 ACTIVITY REPORT", text: "REPORT" } }, { type: "button", style: "primary", color: "#ff9f00", action: { type: "message", label: "💰 SET EXCHANGE RATIO", text: "SET_RATIO_STEP1" } }, { type: "button", style: "secondary", action: { type: "message", label: "🔐 MANAGE ADMINS", text: "LIST_ADMIN" } }] } };
+  await sendFlex(rt, "Admin Dashboard", flex);
+}
+
+async function sendReportMenu(rt) {
+  const flex = { type: "bubble", body: { type: "box", layout: "vertical", spacing: "md", contents: [{ type: "button", style: "primary", color: "#ff4b4b", action: { type: "message", label: "🔔 Pending Requests", text: "SUB_PENDING" } }, { type: "button", style: "primary", color: "#00b900", action: { type: "message", label: "📥 Recent Earns", text: "SUB_EARNS" } }, { type: "button", style: "primary", color: "#ff9f00", action: { type: "message", label: "📤 Recent Redeems", text: "SUB_REDEEMS" } }] } };
+  await sendFlex(rt, "Report Menu", flex);
 }
 
 const PORT = process.env.PORT || 8080;
