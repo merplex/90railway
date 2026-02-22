@@ -37,6 +37,39 @@ const createRow = (machine, uid, pts, time, color, fullUid) => ({
 ============================================================ */
 
 // 🟢 1.0 สร้าง QR สำหรับรับแต้ม (ที่ Boss ใช้ CURL ยิงหา) - คืนชีพแล้วค่ะ! ✨
+// 🟢 1.0.1 API สำหรับให้ ESP32 ยิงมาขอ QR Code โดยเฉพาะ
+app.post("/api/generate-point-token", async (req, res) => {
+    try {
+        const { amount, machine_id } = req.body;
+        
+        // 1. ดึง Config การคำนวณแต้ม
+        const configRes = await pool.query('SELECT * FROM system_configs WHERE config_key = $1', ['exchange_ratio']);
+        const config = configRes.rows[0];
+        const baht_rate = config ? config.baht_val : 10;
+        const point_rate = config ? config.point_val : 1;
+        const point_get = Math.floor((amount / baht_rate) * point_rate); 
+
+        // 2. สร้าง Token
+        const token = crypto.randomUUID();
+
+        // 3. บันทึกลงตาราง qrPointToken (โครงสร้างเดียวกับ 1.0 เลย)
+        await pool.query(
+            'INSERT INTO "qrPointToken" (qr_token, point_get, machine_id, scan_amount, is_used, create_at) VALUES ($1, $2, $3, $4, $5, NOW())',
+            [token, point_get, machine_id, amount, false]
+        );
+
+        // 4. สร้าง URL ให้ ESP32 ไปแปลงเป็นรูป QR (อย่าลืมตั้งค่า RAILWAY_STATIC_URL ในเว็บ Railway นะคะ)
+        const qrUrl = `https://${process.env.RAILWAY_STATIC_URL}/scan?token=${token}`;
+        
+        console.log(`[ESP32] Created Token: ${token} | Machine: ${machine_id} | Points: ${point_get}`);
+        res.status(200).json({ status: 'success', url: qrUrl });
+        
+    } catch (e) {
+        console.error("[ESP32] Generate QR Error:", e);
+        res.status(500).json({ status: 'error', message: e.message });
+    }
+});
+
 app.post("/create-qr", async (req, res) => {
     try {
         const { amount, machine_id } = req.body;
