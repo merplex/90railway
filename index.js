@@ -59,7 +59,8 @@ app.post("/api/generate-point-token", async (req, res) => {
         );
 
         // 4. สร้าง URL ให้ ESP32 ไปแปลงเป็นรูป QR (อย่าลืมตั้งค่า RAILWAY_STATIC_URL ในเว็บ Railway นะคะ)
-        const qrUrl = `https://${process.env.RAILWAY_STATIC_URL}/scan?token=${token}`;
+        // ✅ เปลี่ยนมาใช้เป็นลิงก์ LIFF เหมือนระบบเดิม:
+        const qrUrl = `https://liff.line.me/${process.env.LIFF_ID}?token=${token}`;
         
         console.log(`[ESP32] Created Token: ${token} | Machine: ${machine_id} | Points: ${point_get}`);
         res.status(200).json({ status: 'success', url: qrUrl });
