@@ -40,8 +40,9 @@ const createRow = (machine, uid, pts, time, color, fullUid) => ({
 // 🟢 1.0.1 API สำหรับให้ ESP32 ยิงมาขอ QR Code โดยเฉพาะ
 app.post("/api/generate-point-token", async (req, res) => {
     try {
-        const { amount, machine_id } = req.body;
-        
+        const { amount } = req.body;
+        const machine_id = (req.body.machine_id || "").toUpperCase();
+
         // 1. ดึง Config การคำนวณแต้ม
         const configRes = await pool.query('SELECT * FROM system_configs WHERE config_key = $1', ['exchange_ratio']);
         const config = configRes.rows[0];
@@ -73,7 +74,8 @@ app.post("/api/generate-point-token", async (req, res) => {
 
 app.post("/create-qr", async (req, res) => {
     try {
-        const { amount, machine_id } = req.body;
+        const { amount } = req.body;
+        const machine_id = (req.body.machine_id || "").toUpperCase();
         const configRes = await pool.query('SELECT * FROM system_configs WHERE config_key = $1', ['exchange_ratio']);
         const config = configRes.rows[0];
         const baht_rate = config ? config.baht_val : 10;
@@ -120,7 +122,8 @@ app.get("/liff/consume", async (req, res) => {
 // 🟢 1.2 กดแลกแต้ม (Redeem) - จองคิว PENDING (ยังไม่หักจริง)
 app.get("/liff/redeem-execute", async (req, res) => {
     try {
-        let { userId, amount, machine_id } = req.query;
+        let { userId, amount } = req.query;
+        const machine_id = (req.query.machine_id || "").toUpperCase();
         const pts = parseInt(amount);
 
         const memRes = await pool.query('SELECT id FROM "ninetyMember" WHERE line_user_id = $1', [userId]);
@@ -162,19 +165,40 @@ app.get("/api/get-user-points", async (req, res) => {
     } catch (e) { res.json({ points: 0 }); }
 });
 
-// 🟢 1.4 เครื่อง HMI ยิงมายืนยัน (หักแต้มจริง)
+// 🟢 1.4 ESP32 poll เช็ค pending redeem
+app.get("/machine/check", async (req, res) => {
+    const machine_id = (req.query.machine_id || "").toUpperCase();
+    try {
+        const result = await pool.query(
+            `SELECT id, points_redeemed, status FROM "redeemlogs"
+             WHERE machine_id = $1 AND (
+                 status = 'pending'
+                 OR (status = 'success' AND confirmed_at >= NOW() - INTERVAL '30 seconds')
+             )
+             ORDER BY created_at DESC LIMIT 1`,
+            [machine_id]
+        );
+        if (result.rows.length === 0) return res.json({ status: "idle" });
+        const row = result.rows[0];
+        if (row.status === 'success') return res.json({ status: "success", log_id: row.id, points: row.points_redeemed });
+        res.json({ status: "pending", log_id: row.id, points: row.points_redeemed });
+    } catch (e) { res.status(500).json({ status: "error" }); }
+});
+
+// 🟢 1.5 เครื่อง HMI ยิงมายืนยัน (หักแต้มจริง)
 app.post("/machine/confirm", async (req, res) => {
     const { log_id } = req.body;
     try {
         const logRes = await pool.query(`
-            SELECT r.*, m.line_user_id FROM "redeemlogs" r 
-            JOIN "ninetyMember" m ON r.member_id = m.id 
-            WHERE r.id = $1 AND r.status = 'pending'`, [log_id]);
-        
+            UPDATE "redeemlogs" SET status = 'success', confirmed_at = NOW()
+            WHERE id = $1 AND status = 'pending'
+            RETURNING points_redeemed, member_id,
+                (SELECT line_user_id FROM "ninetyMember" WHERE id = member_id) AS line_user_id,
+                machine_id`, [log_id]);
+
         const logData = logRes.rows[0];
         if (!logData) return res.status(400).json({ success: false });
 
-        await pool.query('UPDATE "redeemlogs" SET status = $1 WHERE id = $2', ['success', log_id]);
         await pool.query('UPDATE "memberWallet" SET point_balance = point_balance - $1 WHERE member_id = $2', [logData.points_redeemed, logData.member_id]);
 
         const newBal = await pool.query('SELECT point_balance FROM "memberWallet" WHERE member_id = $1', [logData.member_id]);

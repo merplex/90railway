@@ -114,9 +114,9 @@
         try {
             const result = await (liff.scanCode ? liff.scanCode() : liff.scanCodeV2());
             if (result && result.value) {
-                let machineId = result.value.trim();
-                if (machineId.includes("machine_id=")) {
-                    machineId = machineId.split("machine_id=")[1].split("&")[0];
+                let machineId = result.value.trim().toUpperCase();
+                if (machineId.includes("MACHINE_ID=")) {
+                    machineId = machineId.split("MACHINE_ID=")[1].split("&")[0];
                 }
                 await executeRedeem(amount, machineId);
             }
