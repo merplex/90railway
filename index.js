@@ -36,6 +36,11 @@ const createRow = (machine, uid, pts, time, color, fullUid) => ({
    1. API SYSTEM (LIFF & MACHINE & CURL)
 ============================================================ */
 
+// 🟢 0.1 Redirect เปิดกล้อง LINE สำหรับสแกน QR (ใช้เป็น URL ใน rich menu)
+app.get("/scan", (req, res) => {
+    res.redirect("line://nv/qrCode");
+});
+
 // 🟢 1.0 สร้าง QR สำหรับรับแต้ม (ที่ Boss ใช้ CURL ยิงหา) - คืนชีพแล้วค่ะ! ✨
 // 🟢 1.0.1 API สำหรับให้ ESP32 ยิงมาขอ QR Code โดยเฉพาะ
 app.post("/api/generate-point-token", async (req, res) => {
