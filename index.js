@@ -224,11 +224,20 @@ app.post("/webhook", async (req, res) => {
   for (let event of events) {
     const userId = event.source.userId;
     const isUserAdmin = await isAdmin(userId);
+
+    // postback: rich menu ส่งมาแบบไม่แสดงข้อความในแชท
+    if (event.type === "postback") {
+      try {
+        if (event.postback.data === "USER_LINE") await sendReply(event.replyToken, `🆔 LINE ID ของคุณคือ:\n${userId}`);
+      } catch (e) { console.error("Postback Error:", e); }
+      continue;
+    }
+
     if (event.type !== "message" || event.message.type !== "text") continue;
     const rawMsg = event.message.text.trim();
     const userMsg = rawMsg.toUpperCase();
     try {
-      if (userMsg === "USER_LINE") return await sendReply(event.replyToken, `ID: ${userId}`);
+      if (userMsg === "USER_LINE" || rawMsg === "Line id คือ") return await sendReply(event.replyToken, `🆔 LINE ID ของคุณคือ:\n${userId}`);
       if (isUserAdmin) {
         if (ratioWaitList.has(userId)) { ratioWaitList.delete(userId); return await updateExchangeRatio(rawMsg, event.replyToken); }
         if (adminWaitList.has(userId)) { adminWaitList.delete(userId); return await addNewAdmin(rawMsg, event.replyToken); }
