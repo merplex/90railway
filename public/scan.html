@@ -16,31 +16,70 @@
             background: #f5f5f5;
             font-family: 'Helvetica Neue', sans-serif;
             color: #333;
+            text-align: center;
+            padding: 24px;
+            box-sizing: border-box;
         }
-        .icon { font-size: 60px; margin-bottom: 16px; }
-        .msg { font-size: 16px; color: #666; }
-        .err { color: #ff4b4b; font-size: 14px; margin-top: 12px; text-align: center; padding: 0 24px; }
+        .icon { font-size: 64px; margin-bottom: 12px; }
+        .title { font-size: 20px; font-weight: bold; margin-bottom: 8px; }
+        .sub { font-size: 14px; color: #888; margin-bottom: 32px; }
+        .btn {
+            background: #00b900;
+            color: white;
+            border: none;
+            border-radius: 14px;
+            padding: 16px 48px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0,185,0,0.3);
+        }
+        .btn:disabled { background: #ccc; box-shadow: none; }
+        .err { color: #ff4b4b; font-size: 13px; margin-top: 20px; }
     </style>
 </head>
 <body>
     <div class="icon">📷</div>
-    <div class="msg">กำลังเปิดกล้อง...</div>
+    <div class="title">สะสมแต้ม</div>
+    <div class="sub">กดปุ่มด้านล่างแล้วสแกน QR ที่หน้าเครื่อง</div>
+    <button class="btn" id="scanBtn" onclick="startScan()">เปิดกล้องสแกน</button>
     <div class="err" id="errMsg"></div>
 
     <script>
+        var liffReady = false;
+
         liff.init({ liffId: "2009026941-ATykVU9X" }).then(() => {
+            liffReady = true;
             if (!liff.isInClient()) {
                 document.getElementById("errMsg").textContent = "กรุณาเปิดในแอป LINE เท่านั้น";
-                return;
-            }
-            return liff.scanCodeV2();
-        }).then((result) => {
-            if (result && result.value) {
-                window.location.href = result.value;
+                document.getElementById("scanBtn").disabled = true;
             }
         }).catch((err) => {
-            document.getElementById("errMsg").textContent = "ไม่สามารถเปิดกล้องได้: " + err.message;
+            document.getElementById("errMsg").textContent = "โหลดไม่สำเร็จ: " + err.message;
+            document.getElementById("scanBtn").disabled = true;
         });
+
+        function startScan() {
+            if (!liffReady) return;
+            var btn = document.getElementById("scanBtn");
+            var errEl = document.getElementById("errMsg");
+            btn.disabled = true;
+            btn.textContent = "กำลังเปิดกล้อง...";
+            errEl.textContent = "";
+
+            liff.scanCodeV2().then((result) => {
+                if (result && result.value) {
+                    window.location.href = result.value;
+                } else {
+                    btn.disabled = false;
+                    btn.textContent = "เปิดกล้องสแกน";
+                }
+            }).catch((err) => {
+                errEl.textContent = "ไม่สามารถเปิดกล้องได้ กรุณาลองใหม่";
+                btn.disabled = false;
+                btn.textContent = "เปิดกล้องสแกน";
+            });
+        }
     </script>
 </body>
 </html>
