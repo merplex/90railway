@@ -80,7 +80,7 @@
             resultEl.className = "result";
 
             try {
-                var res = await liff.scanCodeV2();
+                var res = await (liff.scanCode ? liff.scanCode() : liff.scanCodeV2());
                 if (!res || !res.value) {
                     btn.disabled = false;
                     btn.textContent = "เปิดกล้องสแกน";
