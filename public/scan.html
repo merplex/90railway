@@ -50,25 +50,44 @@
     <script>
         var userId = null;
 
-        liff.init({ liffId: "2009026941-ATykVU9X" }).then(() => {
+        async function initLiff() {
+            var resultEl = document.getElementById("result");
             var btn = document.getElementById("scanBtn");
-            if (!liff.isInClient()) {
-                document.getElementById("result").className = "result err";
-                document.getElementById("result").textContent = "กรุณาเปิดในแอป LINE เท่านั้น";
+            try {
+                await liff.init({ liffId: "2009026941-ATykVU9X" });
+            } catch (e) {
+                resultEl.className = "result err";
+                resultEl.textContent = "[init] " + (e.message || String(e));
                 return;
             }
-            return liff.getProfile();
-        }).then((profile) => {
-            if (profile) {
-                userId = profile.userId;
-                var btn = document.getElementById("scanBtn");
-                btn.disabled = false;
-                btn.textContent = "เปิดกล้องสแกน";
+
+            if (!liff.isInClient()) {
+                resultEl.className = "result err";
+                resultEl.textContent = "กรุณาเปิดในแอป LINE เท่านั้น";
+                return;
             }
-        }).catch((err) => {
-            document.getElementById("result").className = "result err";
-            document.getElementById("result").textContent = "Error: " + (err.code || "") + " " + (err.message || String(err));
-        });
+
+            try {
+                var idToken = liff.getDecodedIDToken();
+                userId = idToken && idToken.sub ? idToken.sub : null;
+            } catch (e) {}
+
+            if (!userId) {
+                try {
+                    var profile = await liff.getProfile();
+                    userId = profile.userId;
+                } catch (e) {
+                    resultEl.className = "result err";
+                    resultEl.textContent = "[getProfile] " + (e.message || String(e));
+                    return;
+                }
+            }
+
+            btn.disabled = false;
+            btn.textContent = "เปิดกล้องสแกน";
+        }
+
+        initLiff();
 
         function startScan() {
             var btn = document.getElementById("scanBtn");
