@@ -4,144 +4,93 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>สแกน QR สะสมแต้ม</title>
-    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
     <style>
-        body {
-            margin: 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            background: #f5f5f5;
-            font-family: 'Helvetica Neue', sans-serif;
-            color: #333;
-            text-align: center;
-            padding: 24px;
-            box-sizing: border-box;
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; font-family: 'Helvetica Neue', sans-serif; }
+        #video { width: 100%; max-width: 480px; display: block; }
+        canvas { display: none; }
+        #overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            color: white; text-align: center; padding: 24px;
         }
-        .icon { font-size: 64px; margin-bottom: 12px; }
-        .title { font-size: 20px; font-weight: bold; margin-bottom: 8px; }
-        .sub { font-size: 14px; color: #888; margin-bottom: 32px; }
-        .btn {
-            background: #00b900;
-            color: white;
-            border: none;
-            border-radius: 14px;
-            padding: 16px 48px;
-            font-size: 18px;
-            font-weight: bold;
-            cursor: pointer;
-            box-shadow: 0 4px 12px rgba(0,185,0,0.3);
+        .frame {
+            width: 240px; height: 240px;
+            border: 3px solid #00b900;
+            border-radius: 16px;
+            box-shadow: 0 0 0 9999px rgba(0,0,0,0.45);
+            margin-bottom: 24px;
         }
-        .btn:disabled { background: #ccc; box-shadow: none; cursor: default; }
-        .result { margin-top: 24px; font-size: 16px; font-weight: bold; }
-        .result.ok { color: #00b900; }
-        .result.err { color: #ff4b4b; font-size: 13px; font-weight: normal; }
+        .label { font-size: 15px; color: #ddd; }
+        #statusMsg { margin-top: 16px; font-size: 14px; color: #00e600; min-height: 20px; }
+        #startBtn {
+            background: #00b900; color: white; border: none;
+            padding: 14px 40px; border-radius: 12px; font-size: 17px; font-weight: bold;
+            cursor: pointer; margin-top: 16px;
+        }
     </style>
 </head>
 <body>
-    <div class="icon" id="icon">📷</div>
-    <div class="title">สะสมแต้ม</div>
-    <div class="sub">กดปุ่มด้านล่างแล้วสแกน QR ที่หน้าเครื่อง</div>
-    <button class="btn" id="scanBtn" onclick="startScan()" disabled>กำลังโหลด...</button>
-    <div class="result" id="result"></div>
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+    <div id="overlay">
+        <div class="frame" id="frame" style="display:none"></div>
+        <div class="label" id="label">กดปุ่มเพื่อเปิดกล้องสแกน QR</div>
+        <div id="statusMsg"></div>
+        <button id="startBtn" onclick="startCamera()">เปิดกล้อง</button>
+    </div>
 
     <script>
-        var userId = null;
+        var scanning = false;
+        var stream = null;
 
-        async function initLiff() {
-            var resultEl = document.getElementById("result");
-            var btn = document.getElementById("scanBtn");
-            try {
-                await liff.init({ liffId: "2009026941-ATykVU9X" });
-            } catch (e) {
-                resultEl.className = "result err";
-                resultEl.textContent = "[init] " + (e.message || String(e));
-                return;
-            }
+        function startCamera() {
+            document.getElementById("startBtn").style.display = "none";
+            document.getElementById("statusMsg").textContent = "กำลังเปิดกล้อง...";
 
-            if (!liff.isInClient()) {
-                resultEl.className = "result err";
-                resultEl.textContent = "กรุณาเปิดในแอป LINE เท่านั้น";
-                return;
-            }
-
-            try {
-                var idToken = liff.getDecodedIDToken();
-                userId = idToken && idToken.sub ? idToken.sub : null;
-            } catch (e) {}
-
-            if (!userId) {
-                try {
-                    var profile = await liff.getProfile();
-                    userId = profile.userId;
-                } catch (e) {
-                    resultEl.className = "result err";
-                    resultEl.textContent = "[getProfile] " + (e.message || String(e));
-                    return;
-                }
-            }
-
-            btn.disabled = false;
-            btn.textContent = "เปิดกล้องสแกน";
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
+                .then(function(s) {
+                    stream = s;
+                    var video = document.getElementById("video");
+                    video.srcObject = s;
+                    video.play();
+                    document.getElementById("frame").style.display = "block";
+                    document.getElementById("label").textContent = "จ่อ QR ที่หน้าเครื่องให้อยู่ในกรอบ";
+                    document.getElementById("statusMsg").textContent = "";
+                    scanning = true;
+                    requestAnimationFrame(tick);
+                })
+                .catch(function(err) {
+                    document.getElementById("statusMsg").textContent = "เปิดกล้องไม่ได้: " + err.message;
+                    document.getElementById("startBtn").style.display = "block";
+                });
         }
 
-        initLiff();
-
-        function startScan() {
-            var btn = document.getElementById("scanBtn");
-            var resultEl = document.getElementById("result");
-            btn.disabled = true;
-            btn.textContent = "กำลังเปิดกล้อง...";
-            resultEl.textContent = "";
-            resultEl.className = "result";
-
-            liff.scanCodeV2().then((res) => {
-                if (!res || !res.value) {
-                    btn.disabled = false;
-                    btn.textContent = "เปิดกล้องสแกน";
-                    return;
-                }
-                // ดึง token จาก URL ที่สแกนได้
-                var token = null;
-                try {
-                    var url = new URL(res.value);
-                    token = url.searchParams.get("token");
-                } catch(e) {}
-
-                if (!token) {
-                    resultEl.className = "result err";
-                    resultEl.textContent = "QR นี้ไม่ใช่ของระบบ";
-                    btn.disabled = false;
-                    btn.textContent = "เปิดกล้องสแกน";
-                    return;
-                }
-
-                btn.textContent = "กำลังบันทึกแต้ม...";
-                return fetch("/liff/consume?token=" + token + "&userId=" + userId);
-            }).then((fetchRes) => {
-                if (!fetchRes) return;
-                return fetchRes.text();
-            }).then((text) => {
-                if (!text) return;
-                if (text === "SUCCESS") {
-                    document.getElementById("icon").textContent = "✅";
-                    resultEl.className = "result ok";
-                    resultEl.textContent = "สะสมแต้มสำเร็จแล้ว!";
-                } else {
-                    resultEl.className = "result err";
-                    resultEl.textContent = "ไม่สำเร็จ: " + text;
-                }
-                btn.disabled = false;
-                btn.textContent = "สแกนอีกครั้ง";
-                document.getElementById("icon").textContent = "📷";
-            }).catch((err) => {
-                resultEl.className = "result err";
-                resultEl.textContent = "เกิดข้อผิดพลาด กรุณาลองใหม่";
-                btn.disabled = false;
-                btn.textContent = "เปิดกล้องสแกน";
-            });
+        function tick() {
+            if (!scanning) return;
+            var video = document.getElementById("video");
+            var canvas = document.getElementById("canvas");
+            if (video.readyState !== video.HAVE_ENOUGH_DATA) {
+                requestAnimationFrame(tick);
+                return;
+            }
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            var ctx = canvas.getContext("2d");
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            var code = jsQR(imageData.data, imageData.width, imageData.height);
+            if (code && code.data) {
+                scanning = false;
+                if (stream) stream.getTracks().forEach(function(t) { t.stop(); });
+                document.getElementById("frame").style.borderColor = "#fff";
+                document.getElementById("label").textContent = "สแกนสำเร็จ! กำลังโหลด...";
+                document.getElementById("statusMsg").textContent = "";
+                window.location.href = code.data;
+            } else {
+                requestAnimationFrame(tick);
+            }
         }
     </script>
 </body>
