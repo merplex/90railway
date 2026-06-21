@@ -67,7 +67,7 @@
             }
         }).catch((err) => {
             document.getElementById("result").className = "result err";
-            document.getElementById("result").textContent = "โหลดไม่สำเร็จ กรุณาปิดแล้วเปิดใหม่";
+            document.getElementById("result").textContent = "Error: " + (err.code || "") + " " + (err.message || String(err));
         });
 
         function startScan() {
