@@ -133,6 +133,13 @@ app.get("/liff/redeem-execute", async (req, res) => {
         const wallRes = await pool.query('SELECT point_balance FROM "memberWallet" WHERE member_id = $1', [member.id]);
         if (!wallRes.rows[0] || wallRes.rows[0].point_balance < pts) return res.status(400).send("แต้มไม่พอ");
 
+        // ล้าง pending ค้างของ machine นี้ที่หมดเวลา (กรณี server restart แล้ว setTimeout ไม่ได้ยิง)
+        await pool.query(
+            `UPDATE "redeemlogs" SET status = 'refunded'
+             WHERE machine_id = $1 AND status = 'pending' AND created_at < NOW() - INTERVAL '60 seconds'`,
+            [machine_id]
+        );
+
         const logRes = await pool.query(
             'INSERT INTO "redeemlogs" (member_id, machine_id, points_redeemed, status, created_at) VALUES ($1, $2, $3, $4, NOW()) RETURNING id',
             [member.id, machine_id, pts, "pending"]
@@ -172,7 +179,7 @@ app.get("/machine/check", async (req, res) => {
         const result = await pool.query(
             `SELECT id, points_redeemed, status FROM "redeemlogs"
              WHERE machine_id = $1 AND (
-                 status = 'pending'
+                 (status = 'pending' AND created_at >= NOW() - INTERVAL '70 seconds')
                  OR (status = 'success' AND confirmed_at >= NOW() - INTERVAL '30 seconds')
              )
              ORDER BY created_at DESC LIMIT 1`,
