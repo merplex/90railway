@@ -17,9 +17,9 @@
         .point-box { background-color: var(--main-green); color: white; padding: 15px; border-radius: 12px; margin-bottom: 10px; box-shadow: 0 4px 8px rgba(0,185,0,0.2); }
         .point-val { font-size: 2.5rem; font-weight: bold; line-height: 1.2; }
         .rate-badge { background-color: #f0fdf0; color: #555; padding: 5px 15px; border-radius: 20px; font-size: 0.85rem; display: inline-block; margin-bottom: 20px; border: 1px solid #ddefdd; }
-        .input-group { display: flex; gap: 10px; margin-bottom: 20px; }
-        .manual-input { flex: 2; padding: 12px; border: 2px solid #ddd; border-radius: 10px; font-size: 1.1rem; text-align: center; outline: none; }
-        .btn-confirm { flex: 1; background-color: var(--main-green); color: white; border: none; border-radius: 10px; font-weight: 600; cursor: pointer; }
+        .input-group { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 12px; }
+        .manual-input { padding: 12px; border: 2px solid #ddd; border-radius: 12px; font-size: 1.1rem; text-align: center; outline: none; }
+        .btn-confirm { background-color: var(--main-green); color: white; border: none; border-radius: 12px; font-weight: 600; font-size: 1.2rem; cursor: pointer; padding: 15px 0; }
         .grid-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
         .btn-quick { background: white; border: 2px solid var(--main-green); color: var(--main-green); padding: 15px 0; border-radius: 12px; font-size: 1.2rem; font-weight: 600; cursor: pointer; transition: 0.2s; }
         .btn-quick:active { background-color: var(--main-green); color: white; transform: scale(0.95); }
