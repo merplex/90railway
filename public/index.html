@@ -158,7 +158,12 @@
         }
         document.getElementById('errorDisplay').innerText = "";
         pendingAmount = amount;
-        startCamera();
+        try {
+            const result = await liff.scanCodeV2();
+            if (result && result.value) handleQRResult(result.value);
+        } catch (e) {
+            startCamera();
+        }
     }
 
     function startCamera() {
