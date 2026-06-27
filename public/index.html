@@ -112,7 +112,7 @@
         }
         document.getElementById('errorDisplay').innerText = "";
         try {
-            const result = await (liff.scanCode ? liff.scanCode() : liff.scanCodeV2());
+            const result = await liff.scanCodeV2();
             if (result && result.value) {
                 let machineId = result.value.trim().toUpperCase();
                 if (machineId.includes("MACHINE_ID=")) {
