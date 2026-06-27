@@ -39,12 +39,17 @@
             align-items: center;
             justify-content: center;
         }
-        #cameraOverlay video {
+        #cameraVideoWrapper {
             width: 90%;
             max-width: 360px;
             max-height: 65vh;
-            object-fit: cover;
             border-radius: 12px;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+        #cameraOverlay video {
+            width: 100%;
+            display: block;
         }
         #cameraOverlay canvas { display: none; }
         .camera-label {
@@ -106,7 +111,9 @@
 
     <div id="cameraOverlay">
         <div class="camera-label">จ่อกล้องไปที่ QR บนเครื่อง</div>
-        <video id="cameraVideo" autoplay playsinline muted></video>
+        <div id="cameraVideoWrapper">
+            <video id="cameraVideo" autoplay playsinline muted></video>
+        </div>
         <canvas id="cameraCanvas"></canvas>
         <button class="btn-cancel-scan" onclick="stopCamera()">ยกเลิก</button>
     </div>
