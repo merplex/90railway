@@ -226,7 +226,8 @@
     async function executeRedeem(amount, machineId) {
         showLoading(true, `กำลังสั่งงานเครื่อง ${machineId}... 🧼`);
         try {
-            await axios.get(`/liff/redeem-execute?userId=${userId}&amount=${amount}&machine_id=${machineId}`);
+            const accessToken = liff.getAccessToken();
+            await axios.get(`/liff/redeem-execute?amount=${amount}&machine_id=${machineId}&accessToken=${accessToken}`);
             showLoading(false);
             alert(`✅ ส่งคำสั่งไปที่เครื่อง ${machineId} แล้วค่ะ!\nกรุณารอสักครู่เพื่อให้เครื่องเริ่มทำงาน 🧸✨`);
             liff.closeWindow();
@@ -239,7 +240,8 @@
 
     async function handleReceivePoints(token) {
         try {
-            await axios.get(`/liff/consume?token=${token}&userId=${userId}`);
+            const accessToken = liff.getAccessToken();
+            await axios.get(`/liff/consume?token=${token}&accessToken=${accessToken}`);
             document.getElementById('statusIcon').innerText = "✅";
             document.getElementById('statusText').innerText = "สะสมแต้มสำเร็จแล้วค่ะ! ✨🧼";
         } catch (err) {

@@ -36,6 +36,28 @@ const createRow = (machine, uid, pts, time, color, fullUid) => ({
    1. API SYSTEM (LIFF & MACHINE & CURL)
 ============================================================ */
 
+// 🔒 ยืนยันตัวตนกับ LINE เอง (ห้ามเชื่อ userId ที่ client ส่งมาตรงๆ เพราะปลอมได้)
+async function verifyLineUser(accessToken) {
+    if (!accessToken) return null;
+    try {
+        const res = await axios.get('https://api.line.me/v2/profile', {
+            headers: { Authorization: `Bearer ${accessToken}` }
+        });
+        return res.data.userId || null;
+    } catch (e) {
+        return null;
+    }
+}
+
+// 🔒 เช็ค API key ของเครื่อง ESP32/HMI ก่อนให้เข้าถึง endpoint ที่เกี่ยวกับแต้ม
+function requireMachineKey(req, res, next) {
+    const key = req.header("x-machine-key");
+    if (!process.env.ESP32_API_KEY || key !== process.env.ESP32_API_KEY) {
+        return res.status(401).json({ status: "error", message: "Unauthorized" });
+    }
+    next();
+}
+
 // 🟢 0.1 Redirect เปิดกล้อง LINE สำหรับสแกน QR (ใช้เป็น URL ใน rich menu)
 app.get("/scan", (req, res) => {
     res.redirect("line://nv/qrCode");
@@ -43,7 +65,7 @@ app.get("/scan", (req, res) => {
 
 // 🟢 1.0 สร้าง QR สำหรับรับแต้ม (ที่ Boss ใช้ CURL ยิงหา) - คืนชีพแล้วค่ะ! ✨
 // 🟢 1.0.1 API สำหรับให้ ESP32 ยิงมาขอ QR Code โดยเฉพาะ
-app.post("/api/generate-point-token", async (req, res) => {
+app.post("/api/generate-point-token", requireMachineKey, async (req, res) => {
     try {
         const { amount } = req.body;
         const machine_id = (req.body.machine_id || "").toUpperCase();
@@ -77,7 +99,7 @@ app.post("/api/generate-point-token", async (req, res) => {
     }
 });
 
-app.post("/create-qr", async (req, res) => {
+app.post("/create-qr", requireMachineKey, async (req, res) => {
     try {
         const { amount } = req.body;
         const machine_id = (req.body.machine_id || "").toUpperCase();
@@ -104,7 +126,10 @@ app.post("/create-qr", async (req, res) => {
 // 🟢 1.1 รับแต้ม (Earn) - ผ่านหน้า LIFF
 app.get("/liff/consume", async (req, res) => {
     try {
-        const { token, userId } = req.query;
+        const { token, accessToken } = req.query;
+        const userId = await verifyLineUser(accessToken);
+        if (!userId) return res.status(401).send("ยืนยันตัวตนไม่สำเร็จ กรุณาเข้า LIFF ใหม่อีกครั้ง");
+
         const qrRes = await pool.query('SELECT * FROM "qrPointToken" WHERE qr_token = $1', [token]);
         const qrData = qrRes.rows[0];
         if (!qrData || qrData.is_used) return res.status(400).send("QR Invalid");
@@ -127,9 +152,12 @@ app.get("/liff/consume", async (req, res) => {
 // 🟢 1.2 กดแลกแต้ม (Redeem) - จองคิว PENDING (ยังไม่หักจริง)
 app.get("/liff/redeem-execute", async (req, res) => {
     try {
-        let { userId, amount } = req.query;
+        let { amount, accessToken } = req.query;
         const machine_id = (req.query.machine_id || "").toUpperCase();
         const pts = parseInt(amount);
+
+        const userId = await verifyLineUser(accessToken);
+        if (!userId) return res.status(401).send("ยืนยันตัวตนไม่สำเร็จ กรุณาเข้า LIFF ใหม่อีกครั้ง");
 
         const memRes = await pool.query('SELECT id FROM "ninetyMember" WHERE line_user_id = $1', [userId]);
         const member = memRes.rows[0];
@@ -198,7 +226,7 @@ app.get("/machine/check", async (req, res) => {
 });
 
 // 🟢 1.5 เครื่อง HMI ยิงมายืนยัน (หักแต้มจริง)
-app.post("/machine/confirm", async (req, res) => {
+app.post("/machine/confirm", requireMachineKey, async (req, res) => {
     const { log_id } = req.body;
     try {
         const logRes = await pool.query(`

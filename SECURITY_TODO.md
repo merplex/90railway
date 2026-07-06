@@ -27,11 +27,13 @@ came from the real machine. An attacker who knows a victim's LINE user id
 could create a pending redeem and confirm it themselves, draining the
 victim's points without the washer ever running.
 
-## Recommended fixes (not yet implemented)
+## Recommended fixes
 
-1. Add a shared-secret / API key header (e.g. `x-machine-key`) checked
-   against an env var for machine-only endpoints: `/api/generate-point-token`,
-   `/create-qr`, `/machine/confirm`.
+1. ✅ DONE (2026-07-06): Added `requireMachineKey` middleware checking
+   `x-machine-key` header against `process.env.ESP32_API_KEY` on
+   `/api/generate-point-token`, `/create-qr`, `/machine/confirm`.
+   Remember to set `ESP32_API_KEY` on Railway and configure the ESP32/HMI
+   firmware (and Boss's curl script for `/create-qr`) to send that header.
 2. For `/liff/consume`, verify the LINE ID token / access token against
    `https://api.line.me/oauth2/v2.1/verify` (or equivalent) instead of
    trusting the `userId` query param.
